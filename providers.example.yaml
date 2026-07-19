@@ -1,0 +1,15 @@
+version: 1
+
+providers:
+  relay:
+    codex:
+      api_key: "sk-codex-example"
+      base_url: "https://codex.example.com/v1"
+    claude:
+      auth_token: "sk-claude-example"
+      base_url: "https://claude.example.com"
+
+  codex-only:
+    codex:
+      api_key: "sk-codex-only-example"
+      base_url: "https://codex-only.example.com/v1"
