@@ -60,6 +60,55 @@ func TestValidateRequiresAgentConfiguration(t *testing.T) {
 	}
 }
 
+func TestUniversalConfigSupportsBothAgents(t *testing.T) {
+	provider := Provider{
+		Universal: &UniversalConfig{APIKey: "shared-secret", BaseURL: "https://shared.example"},
+	}
+
+	codex, ok := provider.EffectiveCodex()
+	if !ok || codex.APIKey != "shared-secret" || codex.BaseURL != "https://shared.example" {
+		t.Fatalf("EffectiveCodex() = %#v, %v", codex, ok)
+	}
+	claude, ok := provider.EffectiveClaude()
+	if !ok || claude.AuthToken != "shared-secret" || claude.BaseURL != "https://shared.example" {
+		t.Fatalf("EffectiveClaude() = %#v, %v", claude, ok)
+	}
+	if provider.ConfigMode() != ConfigModeUniversal {
+		t.Fatalf("ConfigMode() = %q, want universal", provider.ConfigMode())
+	}
+}
+
+func TestAgentSpecificConfigOverridesUniversal(t *testing.T) {
+	provider := Provider{
+		Universal: &UniversalConfig{APIKey: "shared-secret", BaseURL: "https://shared.example"},
+		Codex:     &CodexConfig{APIKey: "codex-secret", BaseURL: "https://codex.example/v1"},
+	}
+
+	codex, ok := provider.EffectiveCodex()
+	if !ok || codex.APIKey != "codex-secret" || codex.BaseURL != "https://codex.example/v1" {
+		t.Fatalf("EffectiveCodex() = %#v, %v", codex, ok)
+	}
+	claude, ok := provider.EffectiveClaude()
+	if !ok || claude.AuthToken != "shared-secret" || claude.BaseURL != "https://shared.example" {
+		t.Fatalf("EffectiveClaude() = %#v, %v", claude, ok)
+	}
+	if provider.ConfigMode() != ConfigModeMixed {
+		t.Fatalf("ConfigMode() = %q, want mixed", provider.ConfigMode())
+	}
+}
+
+func TestValidateRejectsIncompleteUniversalConfig(t *testing.T) {
+	providerRegistry := Registry{
+		Version: CurrentVersion,
+		Providers: map[string]Provider{
+			"shared": {Universal: &UniversalConfig{BaseURL: "https://shared.example"}},
+		},
+	}
+	if err := providerRegistry.Validate(); err == nil || !strings.Contains(err.Error(), "universal.api_key") {
+		t.Fatalf("Validate() error = %v, want universal.api_key error", err)
+	}
+}
+
 func writeRegistry(t *testing.T, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "providers.yaml")

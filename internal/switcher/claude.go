@@ -10,7 +10,7 @@ import (
 	"github.com/shellus/ags/internal/transaction"
 )
 
-func prepareClaude(paths configfile.Paths, provider registry.ClaudeProvider) ([]transaction.Change, error) {
+func prepareClaude(paths configfile.Paths, provider registry.ClaudeConfig) ([]transaction.Change, error) {
 	settings, err := os.ReadFile(paths.ClaudeSettings)
 	if errors.Is(err, os.ErrNotExist) {
 		settings = []byte("{}\n")

@@ -24,13 +24,13 @@ func (Selector) SelectAgent() (switcher.Agent, error) {
 	return agent, err
 }
 
-func (Selector) SelectProvider(agent switcher.Agent, providerRegistry *registry.Registry) (string, error) {
-	options := providerOptions(agent, providerRegistry)
+func (Selector) SelectProvider(agent switcher.Agent, providerRegistry *registry.Registry, current switcher.CurrentState) (string, error) {
+	options := providerOptions(agent, providerRegistry, current)
 	if len(options) == 0 {
 		return "", fmt.Errorf("no provider configures %s", agent)
 	}
 
-	var providerName string
+	providerName := defaultProviderName(agent, providerRegistry, current)
 	err := huh.NewSelect[string]().
 		Title("选择 Provider").
 		Options(options...).
@@ -39,11 +39,11 @@ func (Selector) SelectProvider(agent switcher.Agent, providerRegistry *registry.
 	return providerName, err
 }
 
-func providerOptions(agent switcher.Agent, providerRegistry *registry.Registry) []huh.Option[string] {
+func providerOptions(agent switcher.Agent, providerRegistry *registry.Registry, current switcher.CurrentState) []huh.Option[string] {
 	options := make([]huh.Option[string], 0, len(providerRegistry.Providers))
 	for _, name := range providerRegistry.Names() {
 		provider := providerRegistry.Providers[name]
-		label, ok := providerLabel(agent, name, provider)
+		label, ok := providerLabel(agent, name, provider, current)
 		if !ok {
 			continue
 		}
@@ -52,24 +52,97 @@ func providerOptions(agent switcher.Agent, providerRegistry *registry.Registry) 
 	return options
 }
 
-func providerLabel(agent switcher.Agent, name string, provider registry.Provider) (string, bool) {
+func providerLabel(agent switcher.Agent, name string, provider registry.Provider, current switcher.CurrentState) (string, bool) {
+	marker := currentMarker(agent, name, current)
 	switch agent {
 	case switcher.AgentCodex:
-		if provider.Codex == nil {
+		config, ok := provider.EffectiveCodex()
+		if !ok {
 			return "", false
 		}
-		return fmt.Sprintf("%s  %s", name, provider.Codex.BaseURL), true
+		return fmt.Sprintf("%s%s  %s", name, marker, config.BaseURL), true
 	case switcher.AgentClaude:
-		if provider.Claude == nil {
+		config, ok := provider.EffectiveClaude()
+		if !ok {
 			return "", false
 		}
-		return fmt.Sprintf("%s  %s", name, provider.Claude.BaseURL), true
+		return fmt.Sprintf("%s%s  %s", name, marker, config.BaseURL), true
 	case switcher.AgentAll:
-		if provider.Codex == nil || provider.Claude == nil {
+		codexConfig, supportsCodex := provider.EffectiveCodex()
+		claudeConfig, supportsClaude := provider.EffectiveClaude()
+		if !supportsCodex || !supportsClaude {
 			return "", false
 		}
-		return fmt.Sprintf("%s  Codex: %s  Claude: %s", name, provider.Codex.BaseURL, provider.Claude.BaseURL), true
+		if provider.ConfigMode() == registry.ConfigModeUniversal {
+			return fmt.Sprintf("%s%s  Universal: %s", name, marker, codexConfig.BaseURL), true
+		}
+		return fmt.Sprintf("%s%s  Codex: %s  Claude: %s", name, marker, codexConfig.BaseURL, claudeConfig.BaseURL), true
 	default:
 		return "", false
 	}
+}
+
+func defaultProviderName(agent switcher.Agent, providerRegistry *registry.Registry, current switcher.CurrentState) string {
+	candidates := current.Codex
+	if agent == switcher.AgentClaude {
+		candidates = current.Claude
+	}
+	for _, name := range candidates {
+		provider, ok := providerRegistry.Providers[name]
+		if !ok {
+			continue
+		}
+		switch agent {
+		case switcher.AgentCodex:
+			if _, ok := provider.EffectiveCodex(); ok {
+				return name
+			}
+		case switcher.AgentClaude:
+			if _, ok := provider.EffectiveClaude(); ok {
+				return name
+			}
+		case switcher.AgentAll:
+			_, supportsCodex := provider.EffectiveCodex()
+			_, supportsClaude := provider.EffectiveClaude()
+			if supportsCodex && supportsClaude && containsName(current.Claude, name) {
+				return name
+			}
+		}
+	}
+	return ""
+}
+
+func currentMarker(agent switcher.Agent, name string, current switcher.CurrentState) string {
+	codexCurrent := containsName(current.Codex, name)
+	claudeCurrent := containsName(current.Claude, name)
+
+	switch agent {
+	case switcher.AgentCodex:
+		if codexCurrent {
+			return " [current]"
+		}
+	case switcher.AgentClaude:
+		if claudeCurrent {
+			return " [current]"
+		}
+	case switcher.AgentAll:
+		switch {
+		case codexCurrent && claudeCurrent:
+			return " [current]"
+		case codexCurrent:
+			return " [Codex current]"
+		case claudeCurrent:
+			return " [Claude current]"
+		}
+	}
+	return ""
+}
+
+func containsName(names []string, target string) bool {
+	for _, name := range names {
+		if name == target {
+			return true
+		}
+	}
+	return false
 }

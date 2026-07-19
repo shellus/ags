@@ -43,16 +43,31 @@ Copy-Item .\providers.example.yaml "$HOME\.agent-switch\providers.yaml"
 version: 1
 
 providers:
-  relay:
+  shared-relay:
+    universal:
+      api_key: "sk-shared-example"
+      base_url: "https://shared.example.com"
+
+  agent-specific-relay:
     codex:
       api_key: "sk-codex-example"
       base_url: "https://codex.example.com/v1"
     claude:
       auth_token: "sk-claude-example"
       base_url: "https://claude.example.com"
+
+  mixed-relay:
+    universal:
+      api_key: "sk-shared-example"
+      base_url: "https://shared.example.com"
+    codex:
+      api_key: "sk-codex-override-example"
+      base_url: "https://codex-override.example.com/v1"
 ```
 
-一个 Provider 可以只配置 Codex 或 Claude。未知字段、空密钥和空地址会导致切换失败。
+`universal` 表示同一组 Base URL 和 API Key 可以直接用于 Codex 与 Claude。Agent 专用配置存在时，完整覆盖该 Agent 的 Universal 配置；不进行 URL 与 Key 的局部混合。
+
+一个 Provider 可以只包含 Universal 配置、只配置某个 Agent，或同时包含 Universal 与 Agent 专用覆盖。未知字段、空密钥和空地址会导致切换失败。
 
 ## 使用
 
@@ -65,7 +80,7 @@ ags codex
 ags claude
 ags all
 
-# 查看 Provider 名称和 Base URL
+# 查看 Provider 名称、配置模式和 Base URL
 ags list
 
 # 查看当前配置匹配的 Provider
@@ -79,9 +94,11 @@ ags claude relay
 ags all relay
 ```
 
-交互选择界面在常规终端使用方向键移动、Enter 确认；兼容模式下输入选项编号。Provider 选项会根据目标 Agent 过滤，并显示 Provider 名称和对应 Base URL。
+进入交互选择时会先显示 Codex 和 Claude 当前匹配的 Provider。选择列表会根据目标 Agent 过滤，显示 Provider 名称和对应 Base URL，给当前项添加 `[current]` 标记，并默认定位到当前项。
 
-`all` 要求目标 Provider 同时包含 Codex 和 Claude 配置。全部目标文件生成并校验成功后才会开始写入；写入中途失败时恢复已经修改的文件。
+交互选择界面在常规终端使用方向键移动、Enter 确认；兼容模式下输入选项编号。
+
+`all` 要求目标 Provider 能解析出 Codex 和 Claude 的有效配置；只包含 Universal 配置的 Provider 自动满足该条件。全部目标文件生成并校验成功后才会开始写入；写入中途失败时恢复已经修改的文件。
 
 ## 修改范围
 

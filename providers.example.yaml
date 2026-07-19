@@ -1,6 +1,11 @@
 version: 1
 
 providers:
+  shared-relay:
+    universal:
+      api_key: "sk-shared-example"
+      base_url: "https://shared.example.com"
+
   relay:
     codex:
       api_key: "sk-codex-example"
@@ -13,3 +18,11 @@ providers:
     codex:
       api_key: "sk-codex-only-example"
       base_url: "https://codex-only.example.com/v1"
+
+  mixed-relay:
+    universal:
+      api_key: "sk-shared-example"
+      base_url: "https://shared.example.com"
+    codex:
+      api_key: "sk-codex-override-example"
+      base_url: "https://codex-override.example.com/v1"

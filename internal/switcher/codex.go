@@ -19,7 +19,7 @@ var (
 	tomlStringPattern  = regexp.MustCompile(`^\s*base_url\s*=\s*("(?:\\.|[^"])*"|'[^']*')`)
 )
 
-func prepareCodex(paths configfile.Paths, provider registry.CodexProvider) ([]transaction.Change, error) {
+func prepareCodex(paths configfile.Paths, provider registry.CodexConfig) ([]transaction.Change, error) {
 	auth, err := os.ReadFile(paths.CodexAuth)
 	if err != nil {
 		return nil, fmt.Errorf("read Codex auth file %s: %w", paths.CodexAuth, err)

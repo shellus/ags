@@ -46,8 +46,8 @@ wire_api = "responses"
 		Version: registry.CurrentVersion,
 		Providers: map[string]registry.Provider{
 			"relay": {
-				Codex:  &registry.CodexProvider{APIKey: "new-codex-key", BaseURL: "https://codex.example/v1"},
-				Claude: &registry.ClaudeProvider{AuthToken: "new-claude-key", BaseURL: "https://claude.example"},
+				Codex:  &registry.CodexConfig{APIKey: "new-codex-key", BaseURL: "https://codex.example/v1"},
+				Claude: &registry.ClaudeConfig{AuthToken: "new-claude-key", BaseURL: "https://claude.example"},
 			},
 		},
 	}
@@ -107,7 +107,7 @@ base_url = "old"
 			Version: registry.CurrentVersion,
 			Providers: map[string]registry.Provider{
 				"codex-only": {
-					Codex: &registry.CodexProvider{APIKey: "new", BaseURL: "new"},
+					Codex: &registry.CodexConfig{APIKey: "new", BaseURL: "new"},
 				},
 			},
 		},
@@ -117,6 +117,53 @@ base_url = "old"
 	}
 	if readFile(t, paths.CodexAuth) != originalAuth || readFile(t, paths.CodexConfig) != originalConfig {
 		t.Fatal("Codex files changed after all-agent validation failed")
+	}
+}
+
+func TestSwitchAllUsesUniversalConfigForBothAgents(t *testing.T) {
+	paths := testPaths(t)
+	writeFile(t, paths.CodexAuth, `{"OPENAI_API_KEY":"old"}
+`)
+	writeFile(t, paths.CodexConfig, `[model_providers.custom]
+base_url = "https://old.example"
+`)
+	writeFile(t, paths.ClaudeSettings, `{"env":{"ANTHROPIC_AUTH_TOKEN":"old","ANTHROPIC_BASE_URL":"https://old.example"}}
+`)
+
+	service := Service{
+		Paths: paths,
+		Registry: &registry.Registry{
+			Version: registry.CurrentVersion,
+			Providers: map[string]registry.Provider{
+				"shared": {
+					Universal: &registry.UniversalConfig{APIKey: "shared-secret", BaseURL: "https://shared.example"},
+				},
+			},
+		},
+	}
+	if err := service.Switch(AgentAll, "shared"); err != nil {
+		t.Fatal(err)
+	}
+
+	auth := readJSON(t, paths.CodexAuth)
+	if auth["OPENAI_API_KEY"] != "shared-secret" {
+		t.Fatalf("Codex key = %#v", auth["OPENAI_API_KEY"])
+	}
+	if !strings.Contains(readFile(t, paths.CodexConfig), `base_url = "https://shared.example"`) {
+		t.Fatalf("Codex config = %s", readFile(t, paths.CodexConfig))
+	}
+	claude := readJSON(t, paths.ClaudeSettings)
+	env := claude["env"].(map[string]any)
+	if env["ANTHROPIC_AUTH_TOKEN"] != "shared-secret" || env["ANTHROPIC_BASE_URL"] != "https://shared.example" {
+		t.Fatalf("Claude env = %#v", env)
+	}
+
+	state, err := service.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Codex) != 1 || state.Codex[0] != "shared" || len(state.Claude) != 1 || state.Claude[0] != "shared" {
+		t.Fatalf("Current() = %#v", state)
 	}
 }
 
@@ -142,7 +189,7 @@ func TestSwitchClaudeCreatesMissingSettingsFile(t *testing.T) {
 			Version: registry.CurrentVersion,
 			Providers: map[string]registry.Provider{
 				"relay": {
-					Claude: &registry.ClaudeProvider{AuthToken: "token", BaseURL: "https://example.test"},
+					Claude: &registry.ClaudeConfig{AuthToken: "token", BaseURL: "https://example.test"},
 				},
 			},
 		},

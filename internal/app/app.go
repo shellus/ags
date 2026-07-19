@@ -19,7 +19,7 @@ type Runner struct {
 
 type Selector interface {
 	SelectAgent() (switcher.Agent, error)
-	SelectProvider(switcher.Agent, *registry.Registry) (string, error)
+	SelectProvider(switcher.Agent, *registry.Registry, switcher.CurrentState) (string, error)
 }
 
 type UsageError struct {
@@ -103,22 +103,36 @@ func (r Runner) runInteractive(agent switcher.Agent) error {
 	if err != nil {
 		return err
 	}
+	service := switcher.Service{Paths: r.Paths, Registry: providerRegistry}
+	currentState, currentErr := service.Current()
+	r.printCurrentSummary(currentState, currentErr)
 	if agent == "" {
 		agent, err = r.Selector.SelectAgent()
 		if err != nil {
 			return fmt.Errorf("select agent: %w", err)
 		}
 	}
-	providerName, err := r.Selector.SelectProvider(agent, providerRegistry)
+	providerName, err := r.Selector.SelectProvider(agent, providerRegistry, currentState)
 	if err != nil {
 		return fmt.Errorf("select provider for %s: %w", agent, err)
 	}
-	service := switcher.Service{Paths: r.Paths, Registry: providerRegistry}
 	if err := service.Switch(agent, providerName); err != nil {
 		return err
 	}
 	fmt.Fprintf(r.Out, "Switched %s provider to %s\n", agent, providerName)
 	return nil
+}
+
+func (r Runner) printCurrentSummary(state switcher.CurrentState, detectionErr error) {
+	fmt.Fprintln(r.Out, "Current provider:")
+	if detectionErr != nil {
+		fmt.Fprintln(r.Out, "  codex: unknown")
+		fmt.Fprintln(r.Out, "  claude: unknown")
+		fmt.Fprintf(r.Out, "  warning: unable to detect current provider: %v\n\n", detectionErr)
+		return
+	}
+	fmt.Fprintf(r.Out, "  codex: %s\n", currentNames(state.Codex))
+	fmt.Fprintf(r.Out, "  claude: %s\n\n", currentNames(state.Claude))
 }
 
 func (r Runner) printUsage() {
@@ -142,24 +156,24 @@ Files:
 
 func (r Runner) printProviders(providerRegistry *registry.Registry) {
 	w := tabwriter.NewWriter(r.Out, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "PROVIDER\tCODEX BASE URL\tCLAUDE BASE URL")
+	fmt.Fprintln(w, "PROVIDER\tCONFIG MODE\tCODEX BASE URL\tCLAUDE BASE URL")
 	for _, name := range providerRegistry.Names() {
 		provider := providerRegistry.Providers[name]
-		fmt.Fprintf(w, "%s\t%s\t%s\n", name, codexBaseURL(provider), claudeBaseURL(provider))
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", name, provider.ConfigMode(), codexBaseURL(provider), claudeBaseURL(provider))
 	}
 	_ = w.Flush()
 }
 
 func codexBaseURL(provider registry.Provider) string {
-	if provider.Codex != nil {
-		return provider.Codex.BaseURL
+	if config, ok := provider.EffectiveCodex(); ok {
+		return config.BaseURL
 	}
 	return "-"
 }
 
 func claudeBaseURL(provider registry.Provider) string {
-	if provider.Claude != nil {
-		return provider.Claude.BaseURL
+	if config, ok := provider.EffectiveClaude(); ok {
+		return config.BaseURL
 	}
 	return "-"
 }

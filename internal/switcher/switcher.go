@@ -64,10 +64,12 @@ func (s Service) Current() (CurrentState, error) {
 	state := CurrentState{}
 	for _, name := range s.Registry.Names() {
 		provider := s.Registry.Providers[name]
-		if provider.Codex != nil && provider.Codex.APIKey == codexAPIKey && provider.Codex.BaseURL == codexBaseURL {
+		codexConfig, supportsCodex := provider.EffectiveCodex()
+		if supportsCodex && codexConfig.APIKey == codexAPIKey && codexConfig.BaseURL == codexBaseURL {
 			state.Codex = append(state.Codex, name)
 		}
-		if provider.Claude != nil && provider.Claude.AuthToken == claudeAuthToken && provider.Claude.BaseURL == claudeBaseURL {
+		claudeConfig, supportsClaude := provider.EffectiveClaude()
+		if supportsClaude && claudeConfig.AuthToken == claudeAuthToken && claudeConfig.BaseURL == claudeBaseURL {
 			state.Claude = append(state.Claude, name)
 		}
 	}
@@ -78,10 +80,11 @@ func (s Service) prepare(agent Agent, providerName string, provider registry.Pro
 	var changes []transaction.Change
 
 	if agent == AgentCodex || agent == AgentAll {
-		if provider.Codex == nil {
+		codexConfig, ok := provider.EffectiveCodex()
+		if !ok {
 			return nil, fmt.Errorf("provider %q does not configure codex", providerName)
 		}
-		codexChanges, err := prepareCodex(s.Paths, *provider.Codex)
+		codexChanges, err := prepareCodex(s.Paths, codexConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -89,10 +92,11 @@ func (s Service) prepare(agent Agent, providerName string, provider registry.Pro
 	}
 
 	if agent == AgentClaude || agent == AgentAll {
-		if provider.Claude == nil {
+		claudeConfig, ok := provider.EffectiveClaude()
+		if !ok {
 			return nil, fmt.Errorf("provider %q does not configure claude", providerName)
 		}
-		claudeChanges, err := prepareClaude(s.Paths, *provider.Claude)
+		claudeChanges, err := prepareClaude(s.Paths, claudeConfig)
 		if err != nil {
 			return nil, err
 		}
