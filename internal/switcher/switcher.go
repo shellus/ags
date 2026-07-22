@@ -52,22 +52,25 @@ func (s Service) Switch(agent Agent, providerName string) error {
 }
 
 func (s Service) Current() (CurrentState, error) {
-	codexAPIKey, codexBaseURL, err := readCodexCurrent(s.Paths)
+	codexAPIKey, codexBaseURL, codexModel, err := readCodexCurrent(s.Paths)
 	if err != nil {
 		return CurrentState{}, err
 	}
-	claudeAuthToken, claudeBaseURL, err := readClaudeCurrent(s.Paths)
+	claudeAuthToken, claudeBaseURL, claudeModel, err := readClaudeCurrent(s.Paths)
 	if err != nil {
 		return CurrentState{}, err
 	}
 
 	state := CurrentState{}
 	for _, name := range s.Registry.Names() {
-		provider := s.Registry.Providers[name]
-		if provider.Codex != nil && provider.Codex.APIKey == codexAPIKey && provider.Codex.BaseURL == codexBaseURL {
+		provider, err := s.Registry.Provider(name)
+		if err != nil {
+			return CurrentState{}, err
+		}
+		if provider.Codex != nil && provider.Codex.APIKey == codexAPIKey && provider.Codex.BaseURL == codexBaseURL && (provider.Codex.Model == "" || provider.Codex.Model == codexModel) {
 			state.Codex = append(state.Codex, name)
 		}
-		if provider.Claude != nil && provider.Claude.AuthToken == claudeAuthToken && provider.Claude.BaseURL == claudeBaseURL {
+		if provider.Claude != nil && provider.Claude.AuthToken == claudeAuthToken && provider.Claude.BaseURL == claudeBaseURL && (provider.Claude.Model == "" || provider.Claude.Model == claudeModel) {
 			state.Claude = append(state.Claude, name)
 		}
 	}

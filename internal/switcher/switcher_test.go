@@ -44,10 +44,18 @@ wire_api = "responses"
 
 	providerRegistry := &registry.Registry{
 		Version: registry.CurrentVersion,
+		Defaults: registry.Provider{
+			Codex:  &registry.CodexProvider{Model: "new-codex-model"},
+			Claude: &registry.ClaudeProvider{Model: "new-claude-model"},
+		},
 		Providers: map[string]registry.Provider{
 			"relay": {
 				Codex:  &registry.CodexProvider{APIKey: "new-codex-key", BaseURL: "https://codex.example/v1"},
 				Claude: &registry.ClaudeProvider{AuthToken: "new-claude-key", BaseURL: "https://claude.example"},
+			},
+			"same-connection": {
+				Codex:  &registry.CodexProvider{APIKey: "new-codex-key", BaseURL: "https://codex.example/v1", Model: "other-codex-model"},
+				Claude: &registry.ClaudeProvider{AuthToken: "new-claude-key", BaseURL: "https://claude.example", Model: "other-claude-model"},
 			},
 		},
 	}
@@ -69,7 +77,7 @@ wire_api = "responses"
 	if !strings.Contains(config, `base_url = "https://codex.example/v1"`) {
 		t.Fatalf("Codex custom base URL was not updated:\n%s", config)
 	}
-	if !strings.Contains(config, `base_url = "https://keep.example/v1"`) || !strings.Contains(config, `model = "keep-model"`) {
+	if !strings.Contains(config, `base_url = "https://keep.example/v1"`) || !strings.Contains(config, `model = "new-codex-model"`) || !strings.Contains(config, `model_provider = "custom"`) {
 		t.Fatalf("Codex unrelated config changed:\n%s", config)
 	}
 
@@ -78,7 +86,7 @@ wire_api = "responses"
 	if env["ANTHROPIC_AUTH_TOKEN"] != "new-claude-key" || env["ANTHROPIC_BASE_URL"] != "https://claude.example" {
 		t.Fatalf("Claude provider fields = %#v", env)
 	}
-	if env["IS_SANDBOX"] != "1" || claude["model"] != "keep-model" {
+	if env["IS_SANDBOX"] != "1" || claude["model"] != "new-claude-model" {
 		t.Fatal("Claude unrelated settings changed")
 	}
 
@@ -88,6 +96,81 @@ wire_api = "responses"
 	}
 	if len(state.Codex) != 1 || state.Codex[0] != "relay" || len(state.Claude) != 1 || state.Claude[0] != "relay" {
 		t.Fatalf("Current() = %#v", state)
+	}
+}
+
+func TestSwitchWithoutModelPreservesExistingModels(t *testing.T) {
+	paths := testPaths(t)
+	writeFile(t, paths.CodexAuth, `{"OPENAI_API_KEY":"old"}
+`)
+	writeFile(t, paths.CodexConfig, `model = "keep-codex-model"
+
+[model_providers.custom]
+base_url = "https://old.example/v1"
+`)
+	writeFile(t, paths.ClaudeSettings, `{"model":"keep-claude-model","env":{"ANTHROPIC_AUTH_TOKEN":"old","ANTHROPIC_BASE_URL":"https://old.example"}}
+`)
+	service := Service{
+		Paths: paths,
+		Registry: &registry.Registry{
+			Version: registry.CurrentVersion,
+			Providers: map[string]registry.Provider{
+				"relay": {
+					Codex:  &registry.CodexProvider{APIKey: "new", BaseURL: "https://codex.example/v1"},
+					Claude: &registry.ClaudeProvider{AuthToken: "new", BaseURL: "https://claude.example"},
+				},
+			},
+		},
+	}
+
+	if err := service.Switch(AgentAll, "relay"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(readFile(t, paths.CodexConfig), `model = "keep-codex-model"`) {
+		t.Fatal("Codex model changed without a configured model")
+	}
+	if readJSON(t, paths.ClaudeSettings)["model"] != "keep-claude-model" {
+		t.Fatal("Claude model changed without a configured model")
+	}
+	state, err := service.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Codex) != 1 || state.Codex[0] != "relay" || len(state.Claude) != 1 || state.Claude[0] != "relay" {
+		t.Fatalf("Current() = %#v", state)
+	}
+}
+
+func TestSwitchWithoutModelDoesNotCreateModelFields(t *testing.T) {
+	paths := testPaths(t)
+	writeFile(t, paths.CodexAuth, `{"OPENAI_API_KEY":"old"}
+`)
+	writeFile(t, paths.CodexConfig, `[model_providers.custom]
+base_url = "https://old.example/v1"
+`)
+	writeFile(t, paths.ClaudeSettings, `{"env":{"ANTHROPIC_AUTH_TOKEN":"old","ANTHROPIC_BASE_URL":"https://old.example"}}
+`)
+	service := Service{
+		Paths: paths,
+		Registry: &registry.Registry{
+			Version: registry.CurrentVersion,
+			Providers: map[string]registry.Provider{
+				"relay": {
+					Codex:  &registry.CodexProvider{APIKey: "new", BaseURL: "https://codex.example/v1"},
+					Claude: &registry.ClaudeProvider{AuthToken: "new", BaseURL: "https://claude.example"},
+				},
+			},
+		},
+	}
+
+	if err := service.Switch(AgentAll, "relay"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(readFile(t, paths.CodexConfig), "model =") {
+		t.Fatal("Codex model field was created without a configured model")
+	}
+	if _, ok := readJSON(t, paths.ClaudeSettings)["model"]; ok {
+		t.Fatal("Claude model field was created without a configured model")
 	}
 }
 
@@ -107,7 +190,7 @@ base_url = "old"
 			Version: registry.CurrentVersion,
 			Providers: map[string]registry.Provider{
 				"codex-only": {
-					Codex: &registry.CodexProvider{APIKey: "new", BaseURL: "new"},
+					Codex: &registry.CodexProvider{APIKey: "new", BaseURL: "new", Model: "new-model"},
 				},
 			},
 		},
@@ -117,6 +200,35 @@ base_url = "old"
 	}
 	if readFile(t, paths.CodexAuth) != originalAuth || readFile(t, paths.CodexConfig) != originalConfig {
 		t.Fatal("Codex files changed after all-agent validation failed")
+	}
+}
+
+func TestReplaceCodexModelPreservesCRLFAndOnlyUpdatesTopLevel(t *testing.T) {
+	input := "model_provider = \"custom\"\r\nmodel_reasoning_effort = \"high\"\r\n\r\n[model_providers.custom]\r\nmodel = \"nested-model\"\r\nbase_url = \"https://old.example/v1\"\r\n"
+	updated := replaceCodexModel(input, "new-model")
+	if strings.Contains(strings.ReplaceAll(updated, "\r\n", ""), "\n") {
+		t.Fatalf("updated config introduced LF line endings: %q", updated)
+	}
+	if !strings.Contains(updated, "model = \"new-model\"\r\n") {
+		t.Fatalf("top-level model was not inserted: %q", updated)
+	}
+	if !strings.Contains(updated, "model = \"nested-model\"\r\n") || !strings.Contains(updated, "model_reasoning_effort = \"high\"\r\n") {
+		t.Fatalf("non-target model fields changed: %q", updated)
+	}
+}
+
+func TestReplaceCodexModelReplacesExistingTopLevelField(t *testing.T) {
+	input := "model_provider = \"custom\"\nmodel = 'old-model'\n\n[model_providers.custom]\nbase_url = \"https://old.example/v1\"\n"
+	updated := replaceCodexModel(input, "new-model")
+	if strings.Count(updated, "model =") != 1 || !strings.Contains(updated, `model = "new-model"`) {
+		t.Fatalf("top-level model was not replaced: %q", updated)
+	}
+	model, err := readCodexModel(updated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model != "new-model" {
+		t.Fatalf("readCodexModel() = %q, want new-model", model)
 	}
 }
 
@@ -142,7 +254,7 @@ func TestSwitchClaudeCreatesMissingSettingsFile(t *testing.T) {
 			Version: registry.CurrentVersion,
 			Providers: map[string]registry.Provider{
 				"relay": {
-					Claude: &registry.ClaudeProvider{AuthToken: "token", BaseURL: "https://example.test"},
+					Claude: &registry.ClaudeProvider{AuthToken: "token", BaseURL: "https://example.test", Model: "claude-model"},
 				},
 			},
 		},
@@ -154,6 +266,9 @@ func TestSwitchClaudeCreatesMissingSettingsFile(t *testing.T) {
 	env := settings["env"].(map[string]any)
 	if env["ANTHROPIC_AUTH_TOKEN"] != "token" || env["ANTHROPIC_BASE_URL"] != "https://example.test" {
 		t.Fatalf("created settings env = %#v", env)
+	}
+	if settings["model"] != "claude-model" {
+		t.Fatalf("created settings model = %#v", settings["model"])
 	}
 }
 

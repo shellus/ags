@@ -45,6 +45,43 @@ func TestApplyCreatesPrivateFile(t *testing.T) {
 	}
 }
 
+func TestApplyUpdatesSymbolicLinkTargetWithoutReplacingLink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "shared-config.json")
+	link := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(target, []byte("old"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("create symbolic link: %v", err)
+	}
+
+	if err := Apply([]Change{{Path: link, Content: []byte("new")}}); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Lstat(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("symbolic link was replaced")
+	}
+	content, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "new" {
+		t.Fatalf("target content = %q, want new", content)
+	}
+	targetInfo, err := os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if targetInfo.Mode().Perm() != 0o640 {
+		t.Fatalf("target mode = %o, want 640", targetInfo.Mode().Perm())
+	}
+}
+
 func TestApplyRejectsDuplicatePathsBeforeWriting(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {

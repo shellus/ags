@@ -34,8 +34,13 @@ func Apply(changes []Change) error {
 		if change.Path == "" {
 			return fmt.Errorf("change path must not be empty")
 		}
+		resolvedPath, err := resolveWritePath(change.Path)
+		if err != nil {
+			return err
+		}
+		change.Path = resolvedPath
 		if _, ok := seen[change.Path]; ok {
-			return fmt.Errorf("duplicate change path: %s", change.Path)
+			return fmt.Errorf("duplicate change target: %s", change.Path)
 		}
 		seen[change.Path] = struct{}{}
 
@@ -75,6 +80,25 @@ func Apply(changes []Change) error {
 		committed = append(committed, before)
 	}
 	return nil
+}
+
+func resolveWritePath(path string) (string, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return path, nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("inspect %s: %w", path, err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return path, nil
+	}
+
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve symbolic link %s: %w", path, err)
+	}
+	return resolved, nil
 }
 
 func findSnapshot(snapshots []snapshot, path string) snapshot {

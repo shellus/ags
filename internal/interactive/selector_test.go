@@ -8,22 +8,22 @@ import (
 	"github.com/shellus/ags/internal/switcher"
 )
 
-func TestProviderLabelIncludesNameAndBaseURL(t *testing.T) {
+func TestProviderLabelIncludesNameModelsAndBaseURLs(t *testing.T) {
 	provider := registry.Provider{
-		Codex:  &registry.CodexProvider{BaseURL: "https://codex.example/v1"},
-		Claude: &registry.ClaudeProvider{BaseURL: "https://claude.example"},
+		Codex:  &registry.CodexProvider{BaseURL: "https://codex.example/v1", Model: "codex-model"},
+		Claude: &registry.ClaudeProvider{BaseURL: "https://claude.example", Model: "claude-model"},
 	}
 
 	codexLabel, ok := providerLabel(switcher.AgentCodex, "relay", provider)
-	if !ok || !strings.Contains(codexLabel, "relay") || !strings.Contains(codexLabel, "https://codex.example/v1") {
+	if !ok || !strings.Contains(codexLabel, "relay") || !strings.Contains(codexLabel, "codex-model") || !strings.Contains(codexLabel, "https://codex.example/v1") {
 		t.Fatalf("Codex label = %q, %v", codexLabel, ok)
 	}
 	claudeLabel, ok := providerLabel(switcher.AgentClaude, "relay", provider)
-	if !ok || !strings.Contains(claudeLabel, "relay") || !strings.Contains(claudeLabel, "https://claude.example") {
+	if !ok || !strings.Contains(claudeLabel, "relay") || !strings.Contains(claudeLabel, "claude-model") || !strings.Contains(claudeLabel, "https://claude.example") {
 		t.Fatalf("Claude label = %q, %v", claudeLabel, ok)
 	}
 	allLabel, ok := providerLabel(switcher.AgentAll, "relay", provider)
-	if !ok || !strings.Contains(allLabel, "https://codex.example/v1") || !strings.Contains(allLabel, "https://claude.example") {
+	if !ok || !strings.Contains(allLabel, "codex-model") || !strings.Contains(allLabel, "https://codex.example/v1") || !strings.Contains(allLabel, "claude-model") || !strings.Contains(allLabel, "https://claude.example") {
 		t.Fatalf("All label = %q, %v", allLabel, ok)
 	}
 }
@@ -32,11 +32,11 @@ func TestProviderOptionsFilterUnsupportedAgents(t *testing.T) {
 	providerRegistry := &registry.Registry{
 		Providers: map[string]registry.Provider{
 			"both": {
-				Codex:  &registry.CodexProvider{BaseURL: "codex-both"},
-				Claude: &registry.ClaudeProvider{BaseURL: "claude-both"},
+				Codex:  &registry.CodexProvider{BaseURL: "codex-both", Model: "codex-model"},
+				Claude: &registry.ClaudeProvider{BaseURL: "claude-both", Model: "claude-model"},
 			},
 			"codex-only": {
-				Codex: &registry.CodexProvider{BaseURL: "codex-only"},
+				Codex: &registry.CodexProvider{BaseURL: "codex-only", Model: "codex-model"},
 			},
 		},
 	}
@@ -49,5 +49,15 @@ func TestProviderOptionsFilterUnsupportedAgents(t *testing.T) {
 	}
 	if got := len(providerOptions(switcher.AgentAll, providerRegistry)); got != 1 {
 		t.Fatalf("All options = %d, want 1", got)
+	}
+}
+
+func TestProviderLabelDisplaysDashWhenModelIsUnmanaged(t *testing.T) {
+	provider := registry.Provider{
+		Codex: &registry.CodexProvider{BaseURL: "https://codex.example/v1"},
+	}
+	label, ok := providerLabel(switcher.AgentCodex, "relay", provider)
+	if !ok || !strings.Contains(label, "relay  -  https://codex.example/v1") {
+		t.Fatalf("Codex label = %q, %v", label, ok)
 	}
 }

@@ -10,10 +10,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const CurrentVersion = 1
+const CurrentVersion = 2
 
 type Registry struct {
 	Version   int                 `yaml:"version"`
+	Defaults  Provider            `yaml:"defaults,omitempty"`
 	Providers map[string]Provider `yaml:"providers"`
 }
 
@@ -25,11 +26,13 @@ type Provider struct {
 type CodexProvider struct {
 	APIKey  string `yaml:"api_key"`
 	BaseURL string `yaml:"base_url"`
+	Model   string `yaml:"model"`
 }
 
 type ClaudeProvider struct {
 	AuthToken string `yaml:"auth_token"`
 	BaseURL   string `yaml:"base_url"`
+	Model     string `yaml:"model"`
 }
 
 func Load(path string) (*Registry, error) {
@@ -66,19 +69,20 @@ func (r *Registry) Validate() error {
 		if provider.Codex == nil && provider.Claude == nil {
 			return fmt.Errorf("provider %q must configure codex, claude, or both", name)
 		}
-		if provider.Codex != nil {
-			if strings.TrimSpace(provider.Codex.APIKey) == "" {
+		resolved := r.resolveProvider(provider)
+		if resolved.Codex != nil {
+			if strings.TrimSpace(resolved.Codex.APIKey) == "" {
 				return fmt.Errorf("provider %q codex.api_key must not be empty", name)
 			}
-			if strings.TrimSpace(provider.Codex.BaseURL) == "" {
+			if strings.TrimSpace(resolved.Codex.BaseURL) == "" {
 				return fmt.Errorf("provider %q codex.base_url must not be empty", name)
 			}
 		}
-		if provider.Claude != nil {
-			if strings.TrimSpace(provider.Claude.AuthToken) == "" {
+		if resolved.Claude != nil {
+			if strings.TrimSpace(resolved.Claude.AuthToken) == "" {
 				return fmt.Errorf("provider %q claude.auth_token must not be empty", name)
 			}
-			if strings.TrimSpace(provider.Claude.BaseURL) == "" {
+			if strings.TrimSpace(resolved.Claude.BaseURL) == "" {
 				return fmt.Errorf("provider %q claude.base_url must not be empty", name)
 			}
 		}
@@ -91,7 +95,54 @@ func (r *Registry) Provider(name string) (Provider, error) {
 	if !ok {
 		return Provider{}, fmt.Errorf("unknown provider %q; available providers: %s", name, strings.Join(r.Names(), ", "))
 	}
-	return provider, nil
+	return r.resolveProvider(provider), nil
+}
+
+func (r *Registry) resolveProvider(provider Provider) Provider {
+	return Provider{
+		Codex:  mergeCodexProvider(r.Defaults.Codex, provider.Codex),
+		Claude: mergeClaudeProvider(r.Defaults.Claude, provider.Claude),
+	}
+}
+
+func mergeCodexProvider(defaults, provider *CodexProvider) *CodexProvider {
+	if provider == nil {
+		return nil
+	}
+	defaultValues := CodexProvider{}
+	if defaults != nil {
+		defaultValues = *defaults
+	}
+	return &CodexProvider{
+		APIKey:  mergedValue(provider.APIKey, defaultValues.APIKey),
+		BaseURL: mergedValue(provider.BaseURL, defaultValues.BaseURL),
+		Model:   mergedValue(provider.Model, defaultValues.Model),
+	}
+}
+
+func mergeClaudeProvider(defaults, provider *ClaudeProvider) *ClaudeProvider {
+	if provider == nil {
+		return nil
+	}
+	defaultValues := ClaudeProvider{}
+	if defaults != nil {
+		defaultValues = *defaults
+	}
+	return &ClaudeProvider{
+		AuthToken: mergedValue(provider.AuthToken, defaultValues.AuthToken),
+		BaseURL:   mergedValue(provider.BaseURL, defaultValues.BaseURL),
+		Model:     mergedValue(provider.Model, defaultValues.Model),
+	}
+}
+
+func mergedValue(providerValue, defaultValue string) string {
+	if strings.TrimSpace(providerValue) != "" {
+		return providerValue
+	}
+	if strings.TrimSpace(defaultValue) != "" {
+		return defaultValue
+	}
+	return ""
 }
 
 func (r *Registry) Names() []string {

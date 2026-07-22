@@ -13,19 +13,24 @@ import (
 	"github.com/shellus/ags/internal/switcher"
 )
 
-func TestListPrintsBaseURLsWithoutSecrets(t *testing.T) {
+func TestListPrintsModelsAndBaseURLsWithoutSecrets(t *testing.T) {
 	paths := appTestPaths(t)
 	if err := os.MkdirAll(filepath.Dir(paths.Registry), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	content := `version: 1
+	content := `version: 2
+defaults:
+  codex:
+    api_key: top-secret-codex
+    model: codex-model
+  claude:
+    auth_token: top-secret-claude
+    model: claude-model
 providers:
   relay:
     codex:
-      api_key: top-secret-codex
       base_url: https://codex.example/v1
     claude:
-      auth_token: top-secret-claude
       base_url: https://claude.example
 `
 	if err := os.WriteFile(paths.Registry, []byte(content), 0o600); err != nil {
@@ -44,8 +49,36 @@ providers:
 	if !strings.Contains(result, "https://codex.example/v1") || !strings.Contains(result, "https://claude.example") {
 		t.Fatalf("list output did not include base URLs: %q", result)
 	}
+	if !strings.Contains(result, "codex-model") || !strings.Contains(result, "claude-model") {
+		t.Fatalf("list output did not include models: %q", result)
+	}
 	if strings.Contains(result, "top-secret") {
 		t.Fatalf("list output exposed a secret: %q", result)
+	}
+}
+
+func TestListDisplaysDashForUnmanagedModels(t *testing.T) {
+	paths := appTestPaths(t)
+	writeAppFile(t, paths.Registry, `version: 2
+providers:
+  relay:
+    codex:
+      api_key: codex-key
+      base_url: https://codex.example/v1
+`)
+
+	var output bytes.Buffer
+	runner := Runner{Paths: paths, Out: &output}
+	if err := runner.Run([]string{"list"}); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(output.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("list output = %q", output.String())
+	}
+	fields := strings.Fields(lines[1])
+	if len(fields) != 5 || fields[0] != "relay" || fields[1] != "-" || fields[2] != "https://codex.example/v1" {
+		t.Fatalf("list output = %q", output.String())
 	}
 }
 
@@ -66,6 +99,9 @@ func TestNoArgumentsSelectsAgentAndProvider(t *testing.T) {
 	if env["ANTHROPIC_AUTH_TOKEN"] != "claude-secret" || env["ANTHROPIC_BASE_URL"] != "https://claude.example" {
 		t.Fatalf("Claude env = %#v", env)
 	}
+	if settings["model"] != "claude-model" {
+		t.Fatalf("Claude model = %#v", settings["model"])
+	}
 	if !strings.Contains(output.String(), "Switched claude provider to relay") {
 		t.Fatalf("output = %q", output.String())
 	}
@@ -85,6 +121,10 @@ func TestAgentOnlySelectsProviderWithoutSelectingAgent(t *testing.T) {
 	auth := readAppJSON(t, paths.CodexAuth)
 	if auth["OPENAI_API_KEY"] != "codex-secret" {
 		t.Fatalf("Codex key = %#v", auth["OPENAI_API_KEY"])
+	}
+	config := readAppFile(t, paths.CodexConfig)
+	if !strings.Contains(config, `model = "codex-model"`) {
+		t.Fatalf("Codex model was not updated: %q", config)
 	}
 }
 
@@ -119,7 +159,12 @@ func appTestPaths(t *testing.T) configfile.Paths {
 func writeAppFixture(t *testing.T) configfile.Paths {
 	t.Helper()
 	paths := appTestPaths(t)
-	writeAppFile(t, paths.Registry, `version: 1
+	writeAppFile(t, paths.Registry, `version: 2
+defaults:
+  codex:
+    model: codex-model
+  claude:
+    model: claude-model
 providers:
   relay:
     codex:
@@ -131,10 +176,12 @@ providers:
 `)
 	writeAppFile(t, paths.CodexAuth, `{"OPENAI_API_KEY":"old"}
 `)
-	writeAppFile(t, paths.CodexConfig, `[model_providers.custom]
+	writeAppFile(t, paths.CodexConfig, `model = "old-model"
+
+[model_providers.custom]
 base_url = "https://old.example/v1"
 `)
-	writeAppFile(t, paths.ClaudeSettings, `{"env":{"ANTHROPIC_AUTH_TOKEN":"old","ANTHROPIC_BASE_URL":"https://old.example"}}
+	writeAppFile(t, paths.ClaudeSettings, `{"model":"old-model","env":{"ANTHROPIC_AUTH_TOKEN":"old","ANTHROPIC_BASE_URL":"https://old.example"}}
 `)
 	return paths
 }
@@ -160,4 +207,13 @@ func readAppJSON(t *testing.T, path string) map[string]any {
 		t.Fatal(err)
 	}
 	return value
+}
+
+func readAppFile(t *testing.T, path string) string {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(content)
 }

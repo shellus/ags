@@ -26,25 +26,35 @@ func prepareClaude(paths configfile.Paths, provider registry.ClaudeProvider) ([]
 	if err != nil {
 		return nil, fmt.Errorf("update Claude settings file %s: %w", paths.ClaudeSettings, err)
 	}
+	if provider.Model != "" {
+		updated, err = setJSONString(updated, "model", provider.Model)
+		if err != nil {
+			return nil, fmt.Errorf("update Claude settings file %s: %w", paths.ClaudeSettings, err)
+		}
+	}
 
 	return []transaction.Change{{Path: paths.ClaudeSettings, Content: updated}}, nil
 }
 
-func readClaudeCurrent(paths configfile.Paths) (string, string, error) {
+func readClaudeCurrent(paths configfile.Paths) (string, string, string, error) {
 	settings, err := os.ReadFile(paths.ClaudeSettings)
 	if errors.Is(err, os.ErrNotExist) {
-		return "", "", nil
+		return "", "", "", nil
 	}
 	if err != nil {
-		return "", "", fmt.Errorf("read Claude settings file %s: %w", paths.ClaudeSettings, err)
+		return "", "", "", fmt.Errorf("read Claude settings file %s: %w", paths.ClaudeSettings, err)
 	}
 	authToken, err := readJSONString(settings, "env", "ANTHROPIC_AUTH_TOKEN")
 	if err != nil {
-		return "", "", fmt.Errorf("parse Claude settings file %s: %w", paths.ClaudeSettings, err)
+		return "", "", "", fmt.Errorf("parse Claude settings file %s: %w", paths.ClaudeSettings, err)
 	}
 	baseURL, err := readJSONString(settings, "env", "ANTHROPIC_BASE_URL")
 	if err != nil {
-		return "", "", fmt.Errorf("parse Claude settings file %s: %w", paths.ClaudeSettings, err)
+		return "", "", "", fmt.Errorf("parse Claude settings file %s: %w", paths.ClaudeSettings, err)
 	}
-	return authToken, baseURL, nil
+	model, err := readJSONString(settings, "model")
+	if err != nil {
+		return "", "", "", fmt.Errorf("parse Claude settings file %s: %w", paths.ClaudeSettings, err)
+	}
+	return authToken, baseURL, model, nil
 }

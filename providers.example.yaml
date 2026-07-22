@@ -1,4 +1,10 @@
-version: 1
+version: 2
+
+defaults:
+  codex:
+    model: "gpt-default-example"
+  claude:
+    model: "claude-default-example"
 
 providers:
   relay:
@@ -13,3 +19,4 @@ providers:
     codex:
       api_key: "sk-codex-only-example"
       base_url: "https://codex-only.example.com/v1"
+      model: "gpt-provider-override-example"

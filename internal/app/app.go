@@ -142,12 +142,22 @@ Files:
 
 func (r Runner) printProviders(providerRegistry *registry.Registry) {
 	w := tabwriter.NewWriter(r.Out, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "PROVIDER\tCODEX BASE URL\tCLAUDE BASE URL")
+	fmt.Fprintln(w, "PROVIDER\tCODEX MODEL\tCODEX BASE URL\tCLAUDE MODEL\tCLAUDE BASE URL")
 	for _, name := range providerRegistry.Names() {
-		provider := providerRegistry.Providers[name]
-		fmt.Fprintf(w, "%s\t%s\t%s\n", name, codexBaseURL(provider), claudeBaseURL(provider))
+		provider, err := providerRegistry.Provider(name)
+		if err != nil {
+			continue
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", name, codexModel(provider), codexBaseURL(provider), claudeModel(provider), claudeBaseURL(provider))
 	}
 	_ = w.Flush()
+}
+
+func codexModel(provider registry.Provider) string {
+	if provider.Codex != nil && provider.Codex.Model != "" {
+		return provider.Codex.Model
+	}
+	return "-"
 }
 
 func codexBaseURL(provider registry.Provider) string {
@@ -160,6 +170,13 @@ func codexBaseURL(provider registry.Provider) string {
 func claudeBaseURL(provider registry.Provider) string {
 	if provider.Claude != nil {
 		return provider.Claude.BaseURL
+	}
+	return "-"
+}
+
+func claudeModel(provider registry.Provider) string {
+	if provider.Claude != nil && provider.Claude.Model != "" {
+		return provider.Claude.Model
 	}
 	return "-"
 }

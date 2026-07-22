@@ -14,9 +14,11 @@ import (
 )
 
 var (
-	tomlSectionPattern = regexp.MustCompile(`^\s*\[([^\]]+)\]\s*(?:#.*)?$`)
-	tomlBaseURLPattern = regexp.MustCompile(`^(\s*)base_url\s*=`)
-	tomlStringPattern  = regexp.MustCompile(`^\s*base_url\s*=\s*("(?:\\.|[^"])*"|'[^']*')`)
+	tomlSectionPattern     = regexp.MustCompile(`^\s*\[([^\]]+)\]\s*(?:#.*)?$`)
+	tomlBaseURLPattern     = regexp.MustCompile(`^(\s*)base_url\s*=`)
+	tomlBaseURLString      = regexp.MustCompile(`^\s*base_url\s*=\s*("(?:\\.|[^"])*"|'[^']*')`)
+	tomlModelPattern       = regexp.MustCompile(`^(\s*)model\s*=`)
+	tomlModelStringPattern = regexp.MustCompile(`^\s*model\s*=\s*("(?:\\.|[^"])*"|'[^']*')`)
 )
 
 func prepareCodex(paths configfile.Paths, provider registry.CodexProvider) ([]transaction.Change, error) {
@@ -37,6 +39,9 @@ func prepareCodex(paths configfile.Paths, provider registry.CodexProvider) ([]tr
 	if err != nil {
 		return nil, fmt.Errorf("update Codex config file %s: %w", paths.CodexConfig, err)
 	}
+	if strings.TrimSpace(provider.Model) != "" {
+		updatedConfig = replaceCodexModel(updatedConfig, provider.Model)
+	}
 
 	return []transaction.Change{
 		{Path: paths.CodexAuth, Content: updatedAuth},
@@ -44,31 +49,35 @@ func prepareCodex(paths configfile.Paths, provider registry.CodexProvider) ([]tr
 	}, nil
 }
 
-func readCodexCurrent(paths configfile.Paths) (string, string, error) {
+func readCodexCurrent(paths configfile.Paths) (string, string, string, error) {
 	auth, err := os.ReadFile(paths.CodexAuth)
 	if errors.Is(err, os.ErrNotExist) {
-		return "", "", nil
+		return "", "", "", nil
 	}
 	if err != nil {
-		return "", "", fmt.Errorf("read Codex auth file %s: %w", paths.CodexAuth, err)
+		return "", "", "", fmt.Errorf("read Codex auth file %s: %w", paths.CodexAuth, err)
 	}
 	apiKey, err := readJSONString(auth, "OPENAI_API_KEY")
 	if err != nil {
-		return "", "", fmt.Errorf("parse Codex auth file %s: %w", paths.CodexAuth, err)
+		return "", "", "", fmt.Errorf("parse Codex auth file %s: %w", paths.CodexAuth, err)
 	}
 
 	config, err := os.ReadFile(paths.CodexConfig)
 	if errors.Is(err, os.ErrNotExist) {
-		return "", "", nil
+		return "", "", "", nil
 	}
 	if err != nil {
-		return "", "", fmt.Errorf("read Codex config file %s: %w", paths.CodexConfig, err)
+		return "", "", "", fmt.Errorf("read Codex config file %s: %w", paths.CodexConfig, err)
 	}
 	baseURL, err := readCodexBaseURL(string(config))
 	if err != nil {
-		return "", "", fmt.Errorf("parse Codex config file %s: %w", paths.CodexConfig, err)
+		return "", "", "", fmt.Errorf("parse Codex config file %s: %w", paths.CodexConfig, err)
 	}
-	return apiKey, baseURL, nil
+	model, err := readCodexModel(string(config))
+	if err != nil {
+		return "", "", "", fmt.Errorf("parse Codex config file %s: %w", paths.CodexConfig, err)
+	}
+	return apiKey, baseURL, model, nil
 }
 
 func replaceCodexBaseURL(config, baseURL string) (string, error) {
@@ -124,7 +133,65 @@ func readCodexBaseURL(config string) (string, error) {
 		if !inCustom {
 			continue
 		}
-		match := tomlStringPattern.FindStringSubmatch(plain)
+		match := tomlBaseURLString.FindStringSubmatch(plain)
+		if match == nil {
+			continue
+		}
+		value := match[1]
+		if strings.HasPrefix(value, "'") {
+			return strings.Trim(value, "'"), nil
+		}
+		unquoted, err := strconv.Unquote(value)
+		if err != nil {
+			return "", err
+		}
+		return unquoted, nil
+	}
+	return "", nil
+}
+
+func replaceCodexModel(config, model string) string {
+	lines := splitLines(config)
+	newline := preferredNewline(config)
+	output := make([]string, 0, len(lines)+1)
+	replaced := false
+
+	for _, line := range lines {
+		plain, ending := splitLineEnding(line)
+		if tomlSectionPattern.MatchString(plain) {
+			if !replaced {
+				output = append(output, "model = "+strconv.Quote(model)+newline)
+				replaced = true
+			}
+			output = append(output, line)
+			continue
+		}
+		if !replaced {
+			if match := tomlModelPattern.FindStringSubmatch(plain); match != nil {
+				output = append(output, match[1]+"model = "+strconv.Quote(model)+ending)
+				replaced = true
+				continue
+			}
+		}
+		output = append(output, line)
+	}
+
+	if !replaced {
+		if len(output) > 0 && !hasLineEnding(output[len(output)-1]) {
+			output[len(output)-1] += newline
+		}
+		output = append(output, "model = "+strconv.Quote(model)+newline)
+	}
+	return strings.Join(output, "")
+}
+
+func readCodexModel(config string) (string, error) {
+	for _, line := range splitLines(config) {
+		plain, _ := splitLineEnding(line)
+		if tomlSectionPattern.MatchString(plain) {
+			break
+		}
+		match := tomlModelStringPattern.FindStringSubmatch(plain)
 		if match == nil {
 			continue
 		}
