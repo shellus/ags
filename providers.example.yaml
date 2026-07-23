@@ -7,6 +7,11 @@ defaults:
     model: "claude-default-example"
 
 providers:
+  shared-relay:
+    universal:
+      api_key: "sk-shared-example"
+      base_url: "https://shared.example.com"
+
   relay:
     codex:
       api_key: "sk-codex-example"
@@ -20,3 +25,11 @@ providers:
       api_key: "sk-codex-only-example"
       base_url: "https://codex-only.example.com/v1"
       model: "gpt-provider-override-example"
+
+  mixed-relay:
+    universal:
+      api_key: "sk-shared-example"
+      base_url: "https://shared.example.com"
+    codex:
+      api_key: "sk-codex-override-example"
+      base_url: "https://codex-override.example.com/v1"

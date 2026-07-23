@@ -18,9 +18,10 @@ func main() {
 	}
 
 	runner := app.Runner{
-		Paths:    paths,
-		Out:      os.Stdout,
-		Selector: interactive.Selector{},
+		Paths:       paths,
+		Out:         os.Stdout,
+		UI:          interactive.Selector{},
+		Interactive: isInteractiveTerminal(),
 	}
 	if err := runner.Run(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "ags: %v\n", err)
@@ -31,4 +32,9 @@ func main() {
 		}
 		os.Exit(1)
 	}
+}
+
+func isInteractiveTerminal() bool {
+	info, err := os.Stdin.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }

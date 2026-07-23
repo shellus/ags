@@ -3,17 +3,18 @@ package switcher
 import (
 	"fmt"
 
+	"github.com/shellus/ags/internal/agent"
 	"github.com/shellus/ags/internal/configfile"
 	"github.com/shellus/ags/internal/registry"
 	"github.com/shellus/ags/internal/transaction"
 )
 
-type Agent string
+type Agent = agent.Name
 
 const (
-	AgentCodex  Agent = "codex"
-	AgentClaude Agent = "claude"
-	AgentAll    Agent = "all"
+	AgentCodex  = agent.Codex
+	AgentClaude = agent.Claude
+	AgentAll    = agent.All
 )
 
 type Service struct {
@@ -27,12 +28,7 @@ type CurrentState struct {
 }
 
 func ParseAgent(value string) (Agent, error) {
-	switch Agent(value) {
-	case AgentCodex, AgentClaude, AgentAll:
-		return Agent(value), nil
-	default:
-		return "", fmt.Errorf("unknown agent %q; expected codex, claude, or all", value)
-	}
+	return agent.Parse(value, true)
 }
 
 func (s Service) Switch(agent Agent, providerName string) error {

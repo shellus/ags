@@ -2,27 +2,74 @@
 
 ## 项目边界
 
-- 本项目只负责读取 Provider 注册表并修改 Codex、Claude Code 配置文件中的白名单字段。
-- 不加入请求代理、Provider 健康检查、测速、账号管理、Web 界面、数据库或配置历史功能；终端界面只保留 Agent 和 Provider 单选。
-- Provider 注册表路径保持为用户主目录下的 `.agent-switch/providers.yaml`，不得依赖源码目录或当前工作目录。
-- 命令名和项目名保持为 `ags`。
+- AGS 是 Codex 和 Claude Code 的跨平台环境管理器。
+- AGS 管理 Agent npm 安装版本、Provider、本机环境选择、私有环境仓库、全局指令、Skills、状态检查和自身更新。
+- AGS 不管理账号生命周期、请求代理、Provider 健康检查、测速、Web 界面、数据库或会话历史。
+- 只支持 Codex 和 Claude Code，不加入 pi、Antigravity CLI 或 Claude 自定义 agents。
+- 环境数据与执行器分离：AGS 是公开执行器，私有环境数据由独立 Agent Environment 仓库提供。
 
-## 配置安全
+## 领域边界
 
-- 命令输出、错误信息、测试失败信息和文档不得包含真实 API Key 或认证令牌。
-- `list` 和 Provider 选择界面必须显示 Provider 名称与 Base URL，但不得显示密钥。
-- 修改 Agent 配置时保留所有非白名单字段；新增支持项时必须明确列出允许修改的文件和字段。
-- `all` 切换必须先完成所有文件的读取、解析和目标内容生成，再执行写入；部分写入失败时必须恢复已修改文件。
+- Provider Switching 只负责 Provider 注册表解析和 Agent 白名单字段修改。
+- Agent Environment 负责环境仓库、Profile、版本锁、Agent 包、全局指令和 Skills。
+- Self Distribution 负责 AGS Release、首次安装和自更新。
+- 三个领域共享 Agent 名称和系统路径，不复制 Provider、环境或更新规则。
+- 领域术语和映射见 `CONTEXT-MAP.md`。
 
-## 跨平台约束
+## 配置与状态
 
-- 用户主目录使用 `os.UserHomeDir`，路径使用 `path/filepath`，不得拼接 Linux 专用绝对路径。
-- Codex 目录支持 `CODEX_HOME`，Claude Code 目录支持 `CLAUDE_CONFIG_DIR`。
-- 文件替换逻辑必须同时考虑 Unix 可覆盖重命名和 Windows 不可直接覆盖目标文件的差异。
-- 配置修改应保留原文件的 LF 或 CRLF 行尾。
+- 配置目录通过 `os.UserConfigDir` 解析，包含 `ags/config.yaml` 和 `ags/providers.yaml`。
+- 缓存目录通过 `os.UserCacheDir` 解析，保存环境仓库 checkout、第三方来源和构建暂存。
+- Linux 状态默认位于 `~/.local/state/ags`；Windows 使用本机状态目录。
+- Codex 支持 `CODEX_HOME`，Claude 支持 `CLAUDE_CONFIG_DIR`。
+- 不读取旧 `.agent-switch` 或 `/data/coding` 路径，不保留兼容分支。
 
-## 验证边界
+## 环境应用规则
 
-- 字段映射、无关配置保留、缺失配置、无效 Provider、交互选择分支、Base URL 展示和密钥不出现在输出中都必须有自动化测试。
-- 修改文件写入和路径逻辑后必须运行 Linux 测试，并完成 Windows amd64 交叉构建。
-- 不使用真实用户配置执行自动化测试；测试只操作临时目录和示例密钥。
+- `env apply` 只应用 `environment.lock` 中的精确版本，不隐式升级依赖。
+- `env lock` 只能修改明确指定的本地环境仓库，不自动 commit 或 push。
+- Agent Environment 仓库是受信任代码源，允许声明平台构建命令和正常 npm 安装脚本。
+- 所有来源先进入缓存和构建暂存，构建完成后才修改 Agent。
+- 未受管同名 Skill 必须报告冲突；只删除 `.ags-managed.json` 记录的 Skill。
+- 全局指令由环境仓库完整拥有，不做本机局部合并。
+- Agent 包更新和受管文件应用失败时必须回滚已完成步骤。
+- 卸载默认保留认证、会话、缓存和非受管设置；`--purge` 才删除整个 Agent 配置目录。
+
+## Provider 模型
+
+- `universal` 是 Provider 的共享配置层，不是独立 Provider 类型。
+- Agent 专用配置存在时优先选择整个 Agent 专用块，不从 Universal 逐字段混合。
+- 全局默认值只补全 Provider 已声明或通过 Universal 支持的 Agent。
+- `model` 为空时不修改目标 Agent 的现有模型。
+- 切换、状态识别、列表和交互选择必须统一调用 Provider 有效配置解析。
+- 命令输出、错误和测试不得包含真实密钥或认证令牌。
+- `all` 切换必须先生成所有目标内容，再通过事务统一写入和回滚。
+
+## 交互和命令
+
+- 无参数 `ags` 是主要交互入口；所有交互操作必须调用与非交互命令相同的服务。
+- 非 TTY 环境缺少必要参数时返回用法错误，不启动 TUI。
+- 破坏性操作和非交互覆盖要求 `--yes`；完整清理还要求 `--purge`。
+- 不保留旧根命令别名；命令按 `env`、`agent`、`provider`、`self` 和 `doctor` 分组。
+
+## 跨平台与发布
+
+- 用户目录和目标路径使用 `os.UserHomeDir`、`os.UserConfigDir`、`os.UserCacheDir` 和 `path/filepath`。
+- 外部依赖只要求系统已有 Git、Node.js 和 npm；AGS 不调用 apt、winget 或其他系统包管理器。
+- Git 私有仓库认证完全交给系统 Git、SSH 和 credential helper。
+- 修改路径、事务、安装或更新逻辑后必须运行 Linux 测试和 Windows amd64 交叉构建。
+- Release 必须同时包含 Linux amd64、Windows amd64 和 SHA-256 校验文件。
+
+## 验证
+
+```bash
+gofmt -w ./cmd ./internal
+go test ./...
+go vet ./...
+go build -o bin/ags ./cmd/ags
+GOOS=windows GOARCH=amd64 go build -o bin/ags-windows-amd64.exe ./cmd/ags
+```
+
+- 测试只操作临时目录和示例密钥，不读取或修改真实用户配置。
+- 环境编译测试必须覆盖来源锁、Profile 选择、patch、Node 依赖、受管冲突和回滚。
+- 交互层测试只验证选择映射；业务行为由共享服务测试。

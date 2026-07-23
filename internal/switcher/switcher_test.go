@@ -45,17 +45,17 @@ wire_api = "responses"
 	providerRegistry := &registry.Registry{
 		Version: registry.CurrentVersion,
 		Defaults: registry.Provider{
-			Codex:  &registry.CodexProvider{Model: "new-codex-model"},
-			Claude: &registry.ClaudeProvider{Model: "new-claude-model"},
+			Codex:  &registry.CodexConfig{Model: "new-codex-model"},
+			Claude: &registry.ClaudeConfig{Model: "new-claude-model"},
 		},
 		Providers: map[string]registry.Provider{
 			"relay": {
-				Codex:  &registry.CodexProvider{APIKey: "new-codex-key", BaseURL: "https://codex.example/v1"},
-				Claude: &registry.ClaudeProvider{AuthToken: "new-claude-key", BaseURL: "https://claude.example"},
+				Codex:  &registry.CodexConfig{APIKey: "new-codex-key", BaseURL: "https://codex.example/v1"},
+				Claude: &registry.ClaudeConfig{AuthToken: "new-claude-key", BaseURL: "https://claude.example"},
 			},
 			"same-connection": {
-				Codex:  &registry.CodexProvider{APIKey: "new-codex-key", BaseURL: "https://codex.example/v1", Model: "other-codex-model"},
-				Claude: &registry.ClaudeProvider{AuthToken: "new-claude-key", BaseURL: "https://claude.example", Model: "other-claude-model"},
+				Codex:  &registry.CodexConfig{APIKey: "new-codex-key", BaseURL: "https://codex.example/v1", Model: "other-codex-model"},
+				Claude: &registry.ClaudeConfig{AuthToken: "new-claude-key", BaseURL: "https://claude.example", Model: "other-claude-model"},
 			},
 		},
 	}
@@ -116,8 +116,8 @@ base_url = "https://old.example/v1"
 			Version: registry.CurrentVersion,
 			Providers: map[string]registry.Provider{
 				"relay": {
-					Codex:  &registry.CodexProvider{APIKey: "new", BaseURL: "https://codex.example/v1"},
-					Claude: &registry.ClaudeProvider{AuthToken: "new", BaseURL: "https://claude.example"},
+					Codex:  &registry.CodexConfig{APIKey: "new", BaseURL: "https://codex.example/v1"},
+					Claude: &registry.ClaudeConfig{AuthToken: "new", BaseURL: "https://claude.example"},
 				},
 			},
 		},
@@ -156,8 +156,8 @@ base_url = "https://old.example/v1"
 			Version: registry.CurrentVersion,
 			Providers: map[string]registry.Provider{
 				"relay": {
-					Codex:  &registry.CodexProvider{APIKey: "new", BaseURL: "https://codex.example/v1"},
-					Claude: &registry.ClaudeProvider{AuthToken: "new", BaseURL: "https://claude.example"},
+					Codex:  &registry.CodexConfig{APIKey: "new", BaseURL: "https://codex.example/v1"},
+					Claude: &registry.ClaudeConfig{AuthToken: "new", BaseURL: "https://claude.example"},
 				},
 			},
 		},
@@ -190,7 +190,7 @@ base_url = "old"
 			Version: registry.CurrentVersion,
 			Providers: map[string]registry.Provider{
 				"codex-only": {
-					Codex: &registry.CodexProvider{APIKey: "new", BaseURL: "new", Model: "new-model"},
+					Codex: &registry.CodexConfig{APIKey: "new", BaseURL: "new"},
 				},
 			},
 		},
@@ -232,6 +232,53 @@ func TestReplaceCodexModelReplacesExistingTopLevelField(t *testing.T) {
 	}
 }
 
+func TestSwitchAllUsesUniversalConfigForBothAgents(t *testing.T) {
+	paths := testPaths(t)
+	writeFile(t, paths.CodexAuth, `{"OPENAI_API_KEY":"old"}
+`)
+	writeFile(t, paths.CodexConfig, `[model_providers.custom]
+base_url = "https://old.example"
+`)
+	writeFile(t, paths.ClaudeSettings, `{"env":{"ANTHROPIC_AUTH_TOKEN":"old","ANTHROPIC_BASE_URL":"https://old.example"}}
+`)
+
+	service := Service{
+		Paths: paths,
+		Registry: &registry.Registry{
+			Version: registry.CurrentVersion,
+			Providers: map[string]registry.Provider{
+				"shared": {
+					Universal: &registry.UniversalConfig{APIKey: "shared-secret", BaseURL: "https://shared.example"},
+				},
+			},
+		},
+	}
+	if err := service.Switch(AgentAll, "shared"); err != nil {
+		t.Fatal(err)
+	}
+
+	auth := readJSON(t, paths.CodexAuth)
+	if auth["OPENAI_API_KEY"] != "shared-secret" {
+		t.Fatalf("Codex key = %#v", auth["OPENAI_API_KEY"])
+	}
+	if !strings.Contains(readFile(t, paths.CodexConfig), `base_url = "https://shared.example"`) {
+		t.Fatalf("Codex config = %s", readFile(t, paths.CodexConfig))
+	}
+	claude := readJSON(t, paths.ClaudeSettings)
+	env := claude["env"].(map[string]any)
+	if env["ANTHROPIC_AUTH_TOKEN"] != "shared-secret" || env["ANTHROPIC_BASE_URL"] != "https://shared.example" {
+		t.Fatalf("Claude env = %#v", env)
+	}
+
+	state, err := service.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Codex) != 1 || state.Codex[0] != "shared" || len(state.Claude) != 1 || state.Claude[0] != "shared" {
+		t.Fatalf("Current() = %#v", state)
+	}
+}
+
 func TestReplaceCodexBaseURLPreservesCRLFAndInsertsMissingField(t *testing.T) {
 	input := "[model_providers.custom]\r\nname = \"Custom\"\r\n\r\n[tui]\r\nenabled = true\r\n"
 	updated, err := replaceCodexBaseURL(input, "https://example.test/v1")
@@ -254,7 +301,7 @@ func TestSwitchClaudeCreatesMissingSettingsFile(t *testing.T) {
 			Version: registry.CurrentVersion,
 			Providers: map[string]registry.Provider{
 				"relay": {
-					Claude: &registry.ClaudeProvider{AuthToken: "token", BaseURL: "https://example.test", Model: "claude-model"},
+					Claude: &registry.ClaudeConfig{AuthToken: "token", BaseURL: "https://example.test", Model: "claude-model"},
 				},
 			},
 		},
