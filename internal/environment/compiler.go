@@ -53,16 +53,22 @@ func (c Compiler) runner() command.Runner {
 	return c.Runner
 }
 
-func (c Compiler) Build(repo Repository, profileName string, agents []agent.Name) (BuildResult, error) {
-	buildRoot, err := os.MkdirTemp(filepath.Join(c.CacheDir, "builds"), "build-*")
-	if err != nil {
-		if mkdirErr := os.MkdirAll(filepath.Join(c.CacheDir, "builds"), 0o700); mkdirErr != nil {
-			return BuildResult{}, fmt.Errorf("create build cache: %w", mkdirErr)
-		}
-		buildRoot, err = os.MkdirTemp(filepath.Join(c.CacheDir, "builds"), "build-*")
+func (c Compiler) tempDir(pattern string) (string, error) {
+	root := filepath.Join(c.CacheDir, "builds")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return "", fmt.Errorf("create build cache: %w", err)
 	}
+	path, err := os.MkdirTemp(root, pattern)
 	if err != nil {
-		return BuildResult{}, fmt.Errorf("create build directory: %w", err)
+		return "", fmt.Errorf("create build directory: %w", err)
+	}
+	return path, nil
+}
+
+func (c Compiler) Build(repo Repository, profileName string, agents []agent.Name) (BuildResult, error) {
+	buildRoot, err := c.tempDir("build-*")
+	if err != nil {
+		return BuildResult{}, err
 	}
 	result := BuildResult{Root: buildRoot, Agents: map[agent.Name]RenderedAgent{}}
 	fail := func(err error) (BuildResult, error) {
@@ -76,7 +82,10 @@ func (c Compiler) Build(repo Repository, profileName string, agents []agent.Name
 		return fail(fmt.Errorf("read global instructions: %w", err))
 	}
 
-	resolved, err := c.resolveSources(repo, filepath.Join(buildRoot, "work"))
+	if err := ValidatePublishedSkills(repo); err != nil {
+		return fail(err)
+	}
+	resolved, err := publishedUnits(repo)
 	if err != nil {
 		return fail(err)
 	}
@@ -101,6 +110,9 @@ func (c Compiler) Build(repo Repository, profileName string, agents []agent.Name
 			}
 			if err := copyTree(unit.Path, destination); err != nil {
 				return fail(fmt.Errorf("render skill %s: %w", unit.Name, err))
+			}
+			if err := installNodeDependencies(c.runner(), SkillUnit{Source: unit.Source, Name: unit.Name, Path: destination}); err != nil {
+				return fail(err)
 			}
 			skillNames = append(skillNames, unit.Name)
 		}
@@ -154,11 +166,6 @@ func (c Compiler) resolveSources(repo Repository, workRoot string) (map[string][
 		units, err := discoverUnits(name, workPath, source.Discover)
 		if err != nil {
 			return nil, err
-		}
-		for _, unit := range units {
-			if err := installNodeDependencies(c.runner(), unit); err != nil {
-				return nil, err
-			}
 		}
 		resolved[name] = units
 	}
@@ -496,6 +503,9 @@ func selectUnits(include, exclude []string, sources map[string][]SkillUnit) ([]S
 }
 
 func unitMatches(pattern string, unit SkillUnit, sources map[string][]SkillUnit) bool {
+	if pattern == "*" {
+		return true
+	}
 	if pattern == unit.Source && len(sources[unit.Source]) == 1 {
 		return true
 	}

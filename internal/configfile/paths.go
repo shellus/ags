@@ -30,7 +30,7 @@ func ResolvePaths() (Paths, error) {
 	if err != nil {
 		return Paths{}, fmt.Errorf("resolve user home directory: %w", err)
 	}
-	configDir, err := os.UserConfigDir()
+	systemConfigDir, err := os.UserConfigDir()
 	if err != nil {
 		return Paths{}, fmt.Errorf("resolve user config directory: %w", err)
 	}
@@ -38,15 +38,15 @@ func ResolvePaths() (Paths, error) {
 	if err != nil {
 		return Paths{}, fmt.Errorf("resolve user cache directory: %w", err)
 	}
-	stateDir := resolveStateDir(home, configDir, os.Getenv)
-	return ResolvePathsWith(home, configDir, cacheDir, stateDir, os.Getenv)
+	stateDir := resolveStateDir(home, systemConfigDir, os.Getenv)
+	return ResolvePathsWith(home, cacheDir, stateDir, os.Getenv)
 }
 
-func ResolvePathsWith(home, configRoot, cacheRoot, stateRoot string, getenv func(string) string) (Paths, error) {
+func ResolvePathsWith(home, cacheRoot, stateRoot string, getenv func(string) string) (Paths, error) {
 	if strings.TrimSpace(home) == "" {
 		return Paths{}, fmt.Errorf("user home directory is empty")
 	}
-	for label, value := range map[string]string{"config": configRoot, "cache": cacheRoot, "state": stateRoot} {
+	for label, value := range map[string]string{"cache": cacheRoot, "state": stateRoot} {
 		if strings.TrimSpace(value) == "" {
 			return Paths{}, fmt.Errorf("user %s directory is empty", label)
 		}
@@ -54,7 +54,7 @@ func ResolvePathsWith(home, configRoot, cacheRoot, stateRoot string, getenv func
 
 	codexDir := resolveDirectory(home, getenv("CODEX_HOME"), ".codex")
 	claudeDir := resolveDirectory(home, getenv("CLAUDE_CONFIG_DIR"), ".claude")
-	agsConfigDir := filepath.Join(configRoot, "ags")
+	agsConfigDir := filepath.Join(home, ".ags")
 	agsCacheDir := filepath.Join(cacheRoot, "ags")
 	agsStateDir := filepath.Join(stateRoot, "ags")
 

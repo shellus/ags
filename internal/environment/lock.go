@@ -72,14 +72,5 @@ func ValidateRepository(root string) error {
 	if _, err := os.Stat(filepath.Join(repo.Root, filepath.FromSlash(repo.Manifest.Instructions.Global))); err != nil {
 		return fmt.Errorf("validate global instructions: %w", err)
 	}
-	for name, source := range repo.Manifest.Sources {
-		if source.Type != "local" {
-			continue
-		}
-		root := filepath.Join(repo.Root, filepath.FromSlash(source.Path))
-		if _, err := discoverUnits(name, root, Discover{Mode: source.Discover.Mode, Path: source.Discover.Path}); err != nil {
-			return err
-		}
-	}
-	return nil
+	return ValidatePublishedSkills(repo)
 }

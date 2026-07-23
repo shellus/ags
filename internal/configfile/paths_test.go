@@ -7,16 +7,16 @@ import (
 
 func TestResolvePathsWithDefaults(t *testing.T) {
 	home := filepath.Join(string(filepath.Separator), "users", "tester")
-	configRoot := filepath.Join(home, ".config")
 	cacheRoot := filepath.Join(home, ".cache")
 	stateRoot := filepath.Join(home, ".local", "state")
-	paths, err := ResolvePathsWith(home, configRoot, cacheRoot, stateRoot, func(string) string { return "" })
+	paths, err := ResolvePathsWith(home, cacheRoot, stateRoot, func(string) string { return "" })
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	assertPath(t, paths.Registry, filepath.Join(configRoot, "ags", "providers.yaml"))
-	assertPath(t, paths.AGSConfig, filepath.Join(configRoot, "ags", "config.yaml"))
+	assertPath(t, paths.ConfigDir, filepath.Join(home, ".ags"))
+	assertPath(t, paths.Registry, filepath.Join(home, ".ags", "providers.yaml"))
+	assertPath(t, paths.AGSConfig, filepath.Join(home, ".ags", "config.yaml"))
 	assertPath(t, paths.CacheDir, filepath.Join(cacheRoot, "ags"))
 	assertPath(t, paths.StateDir, filepath.Join(stateRoot, "ags"))
 	assertPath(t, paths.CodexAuth, filepath.Join(home, ".codex", "auth.json"))
@@ -36,7 +36,6 @@ func TestResolvePathsWithOverrides(t *testing.T) {
 	}
 	paths, err := ResolvePathsWith(
 		home,
-		filepath.Join(home, ".config"),
 		filepath.Join(home, ".cache"),
 		filepath.Join(home, ".local", "state"),
 		func(key string) string { return env[key] },

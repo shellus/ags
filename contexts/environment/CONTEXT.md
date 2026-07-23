@@ -7,12 +7,20 @@
 _Avoid_: Skills 同步
 
 **Environment Repository**:
-保存可跨机器共享的环境声明和精确版本锁的私有 Git 仓库。
+保存可跨机器共享的环境声明、精确版本锁和已发布 Skill 快照的私有 Git 仓库。
 _Avoid_: 配置备份
 
 **Environment Lock**:
-固定 Agent npm 版本和第三方 Skill Git commit 的文件。
+固定 Agent npm 版本和维护 Skill 快照所用上游 Git commit 的文件。
 _Avoid_: 最新版本
+
+**Published Skill Snapshot**:
+环境仓库中已经完成上游获取、模板生成和 patch，可由客户端直接应用的 Skill 内容。
+_Avoid_: Skill 源码缓存、本机构建结果
+
+**Upstream Skill Source**:
+仅供环境仓库维护流程获取和生成 Published Skill Snapshot 的外部 Git 来源。
+_Avoid_: 客户端依赖
 
 **Profile**:
 Environment Repository 中一组可供机器选择的 Skill 期望状态，不决定机器启用哪些 Agent。

@@ -2,7 +2,7 @@
 
 ## 状态
 
-Accepted
+Superseded by ADR-0002
 
 ## 背景
 

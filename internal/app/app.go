@@ -135,7 +135,7 @@ func (r Runner) runInteractive() error {
 func (r Runner) runEnvironment(args []string) error {
 	if len(args) == 0 {
 		if !r.Interactive || r.UI == nil {
-			return &UsageError{Message: "usage: ags env <source|configure|apply|status|diff|lock|validate>"}
+			return &UsageError{Message: "usage: ags env <source|configure|apply|status|diff|lock|vendor|validate>"}
 		}
 		return r.runEnvironment([]string{"apply"})
 	}
@@ -169,6 +169,24 @@ func (r Runner) runEnvironment(args []string) error {
 		for _, name := range agent.AllNames() {
 			fmt.Fprintf(r.Out, "  %s: %s\n", name, lock.Agents[name].Version)
 		}
+		return nil
+	case "vendor":
+		repoPath, err := repoOption(args[1:])
+		if err != nil {
+			return err
+		}
+		repo, err := environment.LoadRepository(repoPath)
+		if err != nil {
+			return err
+		}
+		snapshot, err := (environment.Compiler{CacheDir: r.Paths.CacheDir, Runner: r.commands()}).Vendor(repo)
+		if err != nil {
+			return err
+		}
+		if err := environment.ValidateRepository(repoPath); err != nil {
+			return err
+		}
+		fmt.Fprintf(r.Out, "Published %d vendored Skills to %s\n", len(snapshot.Skills), filepath.Join(repo.Root, filepath.FromSlash(repo.Manifest.Skills.Vendor)))
 		return nil
 	default:
 		return &UsageError{Message: fmt.Sprintf("unknown env command %q", args[0])}
@@ -712,6 +730,7 @@ Usage:
   ags env status
   ags env diff
   ags env lock --repo <path>
+  ags env vendor --repo <path>
   ags env validate --repo <path>
   ags agent install <codex|claude|all>
   ags agent uninstall <codex|claude|all> [--purge] [--yes]
@@ -724,8 +743,8 @@ Usage:
   ags doctor
 
 Configuration:
-  <user-config-dir>/ags/config.yaml
-  <user-config-dir>/ags/providers.yaml
+  ~/.ags/config.yaml
+  ~/.ags/providers.yaml
 `)
 }
 
@@ -815,7 +834,7 @@ func repoOption(args []string) (string, error) {
 	if len(args) == 2 && args[0] == "--repo" {
 		return args[1], nil
 	}
-	return "", &UsageError{Message: "usage: ags env <lock|validate> [--repo <path>]"}
+	return "", &UsageError{Message: "usage: ags env <lock|vendor|validate> [--repo <path>]"}
 }
 
 func joinAgents(names []agent.Name) string {

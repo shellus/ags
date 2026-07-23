@@ -55,16 +55,26 @@ func TestServicePrepareAndApply(t *testing.T) {
 	repoRoot := filepath.Join(root, "repo")
 	writeTestFile(t, filepath.Join(repoRoot, "instructions", "global.md"), "shared rules\n")
 	writeTestFile(t, filepath.Join(repoRoot, "skills", "local", "demo", "SKILL.md"), "---\nname: demo\ndescription: demo\n---\n")
-	writeTestFile(t, filepath.Join(repoRoot, "environment.yaml"), `version: 1
+	writeTestFile(t, filepath.Join(repoRoot, "skills", "vendor", snapshotFilename), `version: 1
+sources:
+  upstream: {commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}
+include: [upstream]
+skills: {}
+`)
+	writeTestFile(t, filepath.Join(repoRoot, "environment.yaml"), `version: 2
 instructions: {global: instructions/global.md}
+skills:
+  local: skills/local
+  vendor: skills/vendor
+  vendor_include: [upstream]
 agents:
   codex: {package: "@openai/codex"}
   claude: {package: "@anthropic-ai/claude-code"}
 sources:
-  local:
-    type: local
-    path: skills/local
-    discover: {mode: flat}
+  upstream:
+    type: git
+    url: git@example.com:upstream/skills.git
+    discover: {mode: single, path: skill}
 profiles:
   default:
     include: ["local:*"]
@@ -72,11 +82,12 @@ profiles:
       codex: {preserve: [".system"]}
       claude: {}
 `)
-	writeTestFile(t, filepath.Join(repoRoot, "environment.lock"), `version: 1
+	writeTestFile(t, filepath.Join(repoRoot, "environment.lock"), `version: 2
 agents:
   codex: {version: "1.2.3"}
   claude: {version: "2.3.4"}
-sources: {}
+sources:
+  upstream: {commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}
 `)
 	paths := configfile.Paths{
 		CacheDir:       filepath.Join(root, "cache"),

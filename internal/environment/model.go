@@ -11,11 +11,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const CurrentVersion = 1
+const CurrentVersion = 2
 
 type Manifest struct {
 	Version      int                  `yaml:"version"`
 	Instructions InstructionConfig    `yaml:"instructions"`
+	Skills       SkillsConfig         `yaml:"skills"`
 	Agents       map[agent.Name]Agent `yaml:"agents"`
 	Sources      map[string]Source    `yaml:"sources"`
 	Profiles     map[string]Profile   `yaml:"profiles"`
@@ -24,6 +25,12 @@ type Manifest struct {
 
 type InstructionConfig struct {
 	Global string `yaml:"global"`
+}
+
+type SkillsConfig struct {
+	Local         string   `yaml:"local"`
+	Vendor        string   `yaml:"vendor"`
+	VendorInclude []string `yaml:"vendor_include,omitempty"`
 }
 
 type Agent struct {
@@ -130,6 +137,14 @@ func (r Repository) Validate() error {
 	if !withinRoot(r.Root, filepath.Join(r.Root, filepath.FromSlash(r.Manifest.Instructions.Global))) {
 		return fmt.Errorf("instructions.global leaves repository root")
 	}
+	for label, relative := range map[string]string{"skills.local": r.Manifest.Skills.Local, "skills.vendor": r.Manifest.Skills.Vendor} {
+		if strings.TrimSpace(relative) == "" {
+			return fmt.Errorf("%s must not be empty", label)
+		}
+		if !withinRoot(r.Root, filepath.Join(r.Root, filepath.FromSlash(relative))) {
+			return fmt.Errorf("%s leaves repository root", label)
+		}
+	}
 	for _, name := range agent.AllNames() {
 		spec, ok := r.Manifest.Agents[name]
 		if !ok || strings.TrimSpace(spec.Package) == "" {
@@ -167,12 +182,18 @@ func (r Repository) Validate() error {
 			return fmt.Errorf("source %s has unsupported discover mode %q", name, source.Discover.Mode)
 		}
 	}
+	if len(r.Manifest.Sources) > 0 && len(r.Manifest.Skills.VendorInclude) == 0 {
+		return fmt.Errorf("skills.vendor_include must select published upstream Skills")
+	}
 	for profileName, profile := range r.Manifest.Profiles {
 		if strings.TrimSpace(profileName) == "" {
 			return fmt.Errorf("profile name must not be empty")
 		}
 		if len(profile.Agents) == 0 {
 			return fmt.Errorf("profile %s must configure at least one agent", profileName)
+		}
+		if len(profile.Include) == 0 {
+			return fmt.Errorf("profile %s must include at least one Skill", profileName)
 		}
 		for name := range profile.Agents {
 			if _, err := agent.Parse(string(name), false); err != nil {

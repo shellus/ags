@@ -18,7 +18,7 @@
 
 ## 配置与状态
 
-- 配置目录通过 `os.UserConfigDir` 解析，包含 `ags/config.yaml` 和 `ags/providers.yaml`。
+- Linux 和 Windows 的配置目录统一为 `~/.ags/`，包含 `config.yaml` 和 `providers.yaml`。
 - 缓存目录通过 `os.UserCacheDir` 解析，保存环境仓库 checkout、第三方来源和构建暂存。
 - Linux 状态默认位于 `~/.local/state/ags`；Windows 使用本机状态目录。
 - Codex 支持 `CODEX_HOME`，Claude 支持 `CLAUDE_CONFIG_DIR`。
@@ -28,8 +28,10 @@
 
 - `env apply` 只应用 `environment.lock` 中的精确版本，不隐式升级依赖。
 - `env lock` 只能修改明确指定的本地环境仓库，不自动 commit 或 push。
-- Agent Environment 仓库是受信任代码源，允许声明平台构建命令和正常 npm 安装脚本。
-- 所有来源先进入缓存和构建暂存，构建完成后才修改 Agent。
+- `env vendor` 只在维护 Agent Environment 仓库时获取上游来源、执行构建和 patch，并原子发布 `skills/vendor` 快照。
+- `env apply` 只消费环境仓库中已提交的 `skills/local` 和 `skills/vendor`，不得获取或处理上游 Skill Git 仓库。
+- Agent Environment 仓库是受信任代码源；快照内 Skill 可以声明正常 npm 运行依赖。
+- 所有已发布 Skill 先进入本机构建暂存，运行依赖准备完成后才修改 Agent。
 - 未受管同名 Skill 必须报告冲突；只删除 `.ags-managed.json` 记录的 Skill。
 - 全局指令由环境仓库完整拥有，不做本机局部合并。
 - Agent 包更新和受管文件应用失败时必须回滚已完成步骤。
@@ -54,7 +56,7 @@
 
 ## 跨平台与发布
 
-- 用户目录和目标路径使用 `os.UserHomeDir`、`os.UserConfigDir`、`os.UserCacheDir` 和 `path/filepath`。
+- 配置目录基于 `os.UserHomeDir`；缓存、状态和 Agent 目标路径使用系统目录 API 与 `path/filepath`。
 - 外部依赖只要求系统已有 Git、Node.js 和 npm；AGS 不调用 apt、winget 或其他系统包管理器。
 - Git 私有仓库认证完全交给系统 Git、SSH 和 credential helper。
 - 修改路径、事务、安装或更新逻辑后必须运行 Linux 测试和 Windows amd64 交叉构建。

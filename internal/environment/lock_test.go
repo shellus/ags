@@ -30,8 +30,12 @@ func (r *lockRunner) LookPath(name string) (string, error) { return name, nil }
 func TestUpdateLockResolvesAgentsAndSharedSourceOnce(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, filepath.Join(root, "instructions", "global.md"), "rules")
-	writeTestFile(t, filepath.Join(root, "environment.yaml"), `version: 1
+	writeTestFile(t, filepath.Join(root, "environment.yaml"), `version: 2
 instructions: {global: instructions/global.md}
+skills:
+  local: skills/local
+  vendor: skills/vendor
+  vendor_include: [one]
 agents:
   codex: {package: "@openai/codex"}
   claude: {package: "@anthropic-ai/claude-code"}
@@ -53,7 +57,7 @@ profiles:
       codex: {}
       claude: {}
 `)
-	writeTestFile(t, filepath.Join(root, "environment.lock"), `version: 1
+	writeTestFile(t, filepath.Join(root, "environment.lock"), `version: 2
 agents:
   codex: {version: "1.0.0"}
   claude: {version: "2.0.0"}
