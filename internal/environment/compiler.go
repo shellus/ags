@@ -2,6 +2,7 @@ package environment
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -608,7 +609,7 @@ func TreeHash(root string) (string, error) {
 		if err != nil {
 			return err
 		}
-		_, copyErr := io.Copy(hash, file)
+		copyErr := writePortableFileHash(hash, file)
 		closeErr := file.Close()
 		if copyErr != nil {
 			return copyErr
@@ -619,4 +620,52 @@ func TreeHash(root string) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func writePortableFileHash(destination io.Writer, file *os.File) error {
+	binary, err := containsNUL(file)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	if binary {
+		_, err := io.Copy(destination, file)
+		return err
+	}
+
+	reader := bufio.NewReader(file)
+	for {
+		line, readErr := reader.ReadBytes('\n')
+		if len(line) >= 2 && line[len(line)-2] == '\r' {
+			line[len(line)-2] = '\n'
+			line = line[:len(line)-1]
+		}
+		if _, err := destination.Write(line); err != nil {
+			return err
+		}
+		if readErr == io.EOF {
+			return nil
+		}
+		if readErr != nil {
+			return readErr
+		}
+	}
+}
+
+func containsNUL(file *os.File) (bool, error) {
+	buffer := make([]byte, 32*1024)
+	for {
+		count, err := file.Read(buffer)
+		if bytes.IndexByte(buffer[:count], 0) >= 0 {
+			return true, nil
+		}
+		if err == io.EOF {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+	}
 }

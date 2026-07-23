@@ -3,6 +3,7 @@ package environment
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/shellus/ags/internal/agent"
@@ -97,8 +98,19 @@ sources: {}
 	if err := ValidateRepository(root); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(root, "skills", "vendor", "external-skill", "SKILL.md")); err != nil {
+	vendoredSkill := filepath.Join(root, "skills", "vendor", "external-skill", "SKILL.md")
+	if _, err := os.Stat(vendoredSkill); err != nil {
 		t.Fatal(err)
+	}
+	content, err := os.ReadFile(vendoredSkill)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(vendoredSkill, []byte(strings.ReplaceAll(string(content), "\n", "\r\n")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateRepository(root); err != nil {
+		t.Fatalf("CRLF checkout rejected: %v", err)
 	}
 	writeTestFile(t, filepath.Join(root, "environment.lock"), `version: 2
 agents:
@@ -113,5 +125,47 @@ sources:
 	}
 	if err := ValidatePublishedSkills(staleRepo); err == nil {
 		t.Fatal("stale Skill snapshot was accepted")
+	}
+}
+
+func TestTreeHashNormalizesTextLineEndings(t *testing.T) {
+	lfRoot := t.TempDir()
+	crlfRoot := t.TempDir()
+	writeTestFile(t, filepath.Join(lfRoot, "SKILL.md"), "line one\nline two\n")
+	writeTestFile(t, filepath.Join(crlfRoot, "SKILL.md"), "line one\r\nline two\r\n")
+
+	lfHash, err := TreeHash(lfRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	crlfHash, err := TreeHash(crlfRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lfHash != crlfHash {
+		t.Fatalf("LF hash %s differs from CRLF hash %s", lfHash, crlfHash)
+	}
+}
+
+func TestTreeHashDoesNotNormalizeBinaryContent(t *testing.T) {
+	firstRoot := t.TempDir()
+	secondRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(firstRoot, "asset.bin"), []byte{0, '\r', '\n'}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(secondRoot, "asset.bin"), []byte{0, '\n'}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	firstHash, err := TreeHash(firstRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondHash, err := TreeHash(secondRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstHash == secondHash {
+		t.Fatal("binary CRLF bytes were normalized")
 	}
 }
