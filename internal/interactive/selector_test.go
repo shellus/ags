@@ -1,12 +1,31 @@
 package interactive
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
+	"github.com/shellus/ags/internal/app"
 	"github.com/shellus/ags/internal/registry"
 	"github.com/shellus/ags/internal/switcher"
 )
+
+func TestSelectMainActionUsesArrowKeyTUIWhenTermIsDumb(t *testing.T) {
+	t.Setenv("TERM", "dumb")
+	input := strings.NewReader("\x1b[B\r")
+	var output bytes.Buffer
+
+	action, err := (Selector{Input: input, Output: &output}).SelectMainAction()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if action != app.ActionEnvironmentConfigure {
+		t.Fatalf("action = %q, want %q", action, app.ActionEnvironmentConfigure)
+	}
+	if strings.Contains(output.String(), "Enter a number between") {
+		t.Fatalf("selector fell back to accessible numeric input: %q", output.String())
+	}
+}
 
 func TestProviderLabelIncludesNameModelsBaseURLsAndCurrentMarker(t *testing.T) {
 	provider := registry.Provider{

@@ -20,7 +20,7 @@ func main() {
 	runner := app.Runner{
 		Paths:       paths,
 		Out:         os.Stdout,
-		UI:          interactive.Selector{},
+		UI:          interactive.Selector{Input: os.Stdin, Output: os.Stderr},
 		Interactive: isInteractiveTerminal(),
 	}
 	if err := runner.Run(os.Args[1:]); err != nil {

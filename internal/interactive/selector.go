@@ -2,6 +2,7 @@ package interactive
 
 import (
 	"fmt"
+	"io"
 
 	"charm.land/huh/v2"
 	"github.com/shellus/ags/internal/agent"
@@ -10,11 +11,14 @@ import (
 	"github.com/shellus/ags/internal/switcher"
 )
 
-type Selector struct{}
+type Selector struct {
+	Input  io.Reader
+	Output io.Writer
+}
 
-func (Selector) SelectMainAction() (string, error) {
+func (s Selector) SelectMainAction() (string, error) {
 	var action string
-	err := huh.NewSelect[string]().
+	field := huh.NewSelect[string]().
 		Title("选择操作").
 		Options(
 			huh.NewOption("应用 Agent 环境", app.ActionEnvironmentApply),
@@ -26,26 +30,26 @@ func (Selector) SelectMainAction() (string, error) {
 			huh.NewOption("环境检查", app.ActionDoctor),
 			huh.NewOption("更新 AGS", app.ActionSelfUpdate),
 		).
-		Value(&action).
-		Run()
+		Value(&action)
+	err := s.runField(field)
 	return action, err
 }
 
-func (Selector) SelectAgent() (switcher.Agent, error) {
+func (s Selector) SelectAgent() (switcher.Agent, error) {
 	var agent switcher.Agent
-	err := huh.NewSelect[switcher.Agent]().
+	field := huh.NewSelect[switcher.Agent]().
 		Title("选择 Agent").
 		Options(
 			huh.NewOption("Codex", switcher.AgentCodex),
 			huh.NewOption("Claude", switcher.AgentClaude),
 			huh.NewOption("All (Codex + Claude)", switcher.AgentAll),
 		).
-		Value(&agent).
-		Run()
+		Value(&agent)
+	err := s.runField(field)
 	return agent, err
 }
 
-func (Selector) SelectAgents(title string, selected []agent.Name) ([]agent.Name, error) {
+func (s Selector) SelectAgents(title string, selected []agent.Name) ([]agent.Name, error) {
 	selectedSet := map[agent.Name]bool{}
 	for _, name := range selected {
 		selectedSet[name] = true
@@ -55,15 +59,15 @@ func (Selector) SelectAgents(title string, selected []agent.Name) ([]agent.Name,
 		huh.NewOption("Claude Code", agent.Claude).Selected(selectedSet[agent.Claude]),
 	}
 	values := append([]agent.Name{}, selected...)
-	err := huh.NewMultiSelect[agent.Name]().
+	field := huh.NewMultiSelect[agent.Name]().
 		Title(title).
 		Options(options...).
-		Value(&values).
-		Run()
+		Value(&values)
+	err := s.runField(field)
 	return values, err
 }
 
-func (Selector) ConfigureEnvironment(profiles []string, currentProfile string, currentAgents []agent.Name) (string, []agent.Name, error) {
+func (s Selector) ConfigureEnvironment(profiles []string, currentProfile string, currentAgents []agent.Name) (string, []agent.Name, error) {
 	profileOptions := make([]huh.Option[string], 0, len(profiles))
 	for _, name := range profiles {
 		profileOptions = append(profileOptions, huh.NewOption(name, name))
@@ -76,7 +80,7 @@ func (Selector) ConfigureEnvironment(profiles []string, currentProfile string, c
 		selectedSet[name] = true
 	}
 	selectedAgents := append([]agent.Name{}, currentAgents...)
-	form := huh.NewForm(huh.NewGroup(
+	form := s.newForm(huh.NewGroup(
 		huh.NewSelect[string]().
 			Title("选择 Profile").
 			Options(profileOptions...).
@@ -98,11 +102,11 @@ func (Selector) ConfigureEnvironment(profiles []string, currentProfile string, c
 	return currentProfile, selectedAgents, nil
 }
 
-func (Selector) InputSource(currentSource, currentBranch string) (string, string, error) {
+func (s Selector) InputSource(currentSource, currentBranch string) (string, string, error) {
 	if currentBranch == "" {
 		currentBranch = "main"
 	}
-	form := huh.NewForm(huh.NewGroup(
+	form := s.newForm(huh.NewGroup(
 		huh.NewInput().
 			Title("Agent Environment Git URL 或本地路径").
 			Value(&currentSource),
@@ -119,30 +123,45 @@ func (Selector) InputSource(currentSource, currentBranch string) (string, string
 	return currentSource, currentBranch, nil
 }
 
-func (Selector) Confirm(title string) (bool, error) {
+func (s Selector) Confirm(title string) (bool, error) {
 	confirmed := false
-	err := huh.NewConfirm().
+	field := huh.NewConfirm().
 		Title(title).
 		Affirmative("确认").
 		Negative("取消").
-		Value(&confirmed).
-		Run()
+		Value(&confirmed)
+	err := s.runField(field)
 	return confirmed, err
 }
 
-func (Selector) SelectProvider(agent switcher.Agent, providerRegistry *registry.Registry, current switcher.CurrentState) (string, error) {
+func (s Selector) SelectProvider(agent switcher.Agent, providerRegistry *registry.Registry, current switcher.CurrentState) (string, error) {
 	options := providerOptions(agent, providerRegistry, current)
 	if len(options) == 0 {
 		return "", fmt.Errorf("no provider configures %s", agent)
 	}
 
 	providerName := defaultProviderName(agent, providerRegistry, current)
-	err := huh.NewSelect[string]().
+	field := huh.NewSelect[string]().
 		Title("选择 Provider").
 		Options(options...).
-		Value(&providerName).
-		Run()
+		Value(&providerName)
+	err := s.runField(field)
 	return providerName, err
+}
+
+func (s Selector) runField(field huh.Field) error {
+	return s.newForm(huh.NewGroup(field)).WithShowHelp(false).Run()
+}
+
+func (s Selector) newForm(groups ...*huh.Group) *huh.Form {
+	form := huh.NewForm(groups...).WithAccessible(false)
+	if s.Input != nil {
+		form.WithInput(s.Input)
+	}
+	if s.Output != nil {
+		form.WithOutput(s.Output)
+	}
+	return form
 }
 
 func providerOptions(agent switcher.Agent, providerRegistry *registry.Registry, current switcher.CurrentState) []huh.Option[string] {
