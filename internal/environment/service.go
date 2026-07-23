@@ -90,9 +90,6 @@ func (s Service) Prepare(config localconfig.Config, overrideAgents []agent.Name,
 }
 
 func (s Service) Apply(plan Plan) error {
-	if plan.HasConflicts() {
-		return fmt.Errorf("environment has unmanaged Skill conflicts")
-	}
 	manager := s.manager()
 	type packageRollback struct {
 		pkg     agent.Package
@@ -221,6 +218,7 @@ type agentBackup struct {
 	InstructionExists bool
 	InstructionMode   os.FileMode
 	Skills            []string
+	AffectedSkills    []string
 	MarkerExists      bool
 }
 
@@ -239,7 +237,14 @@ func (s Service) backupManaged(plan Plan) ([]agentBackup, error) {
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return nil, err
 		}
-		for skillName := range item.ManagedBefore {
+		existingBefore := map[string]string{}
+		for skillName, hash := range item.ManagedBefore {
+			existingBefore[skillName] = hash
+		}
+		for skillName, hash := range item.TakeoverBefore {
+			existingBefore[skillName] = hash
+		}
+		for skillName := range existingBefore {
 			source := filepath.Join(item.SkillsDestination, skillName)
 			if _, err := os.Stat(source); errors.Is(err, os.ErrNotExist) {
 				continue
@@ -251,6 +256,21 @@ func (s Service) backupManaged(plan Plan) ([]agentBackup, error) {
 			}
 			backup.Skills = append(backup.Skills, skillName)
 		}
+		affected := map[string]bool{}
+		for skillName := range item.ManagedBefore {
+			affected[skillName] = true
+		}
+		for skillName := range item.TakeoverBefore {
+			affected[skillName] = true
+		}
+		for skillName := range item.DesiredSkills {
+			affected[skillName] = true
+		}
+		for skillName := range affected {
+			backup.AffectedSkills = append(backup.AffectedSkills, skillName)
+		}
+		sort.Strings(backup.Skills)
+		sort.Strings(backup.AffectedSkills)
 		marker := filepath.Join(item.SkillsDestination, ".ags-managed.json")
 		if info, err := os.Stat(marker); err == nil {
 			backup.MarkerExists = true
@@ -272,6 +292,11 @@ func (s Service) applyManaged(plan Plan) error {
 			return err
 		}
 		for skillName := range item.ManagedBefore {
+			if err := os.RemoveAll(filepath.Join(item.SkillsDestination, skillName)); err != nil {
+				return err
+			}
+		}
+		for skillName := range item.TakeoverBefore {
 			if err := os.RemoveAll(filepath.Join(item.SkillsDestination, skillName)); err != nil {
 				return err
 			}
@@ -308,8 +333,7 @@ func (s Service) restoreManaged(backups []agentBackup) error {
 		} else if err := os.Remove(guidance); err != nil && !errors.Is(err, os.ErrNotExist) {
 			rollbackErr = errors.Join(rollbackErr, err)
 		}
-		marker, _ := readMarker(skillsDir)
-		for skillName := range marker.Skills {
+		for _, skillName := range backup.AffectedSkills {
 			if err := os.RemoveAll(filepath.Join(skillsDir, skillName)); err != nil {
 				rollbackErr = errors.Join(rollbackErr, err)
 			}

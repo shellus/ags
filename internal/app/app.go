@@ -335,13 +335,7 @@ func (r Runner) runEnvironmentPlan(commandName string, args []string) error {
 	defer plan.Cleanup()
 	r.printPlan(plan, commandName == "diff")
 	if commandName != "apply" {
-		if plan.HasConflicts() {
-			return fmt.Errorf("environment has unmanaged Skill conflicts")
-		}
 		return nil
-	}
-	if plan.HasConflicts() {
-		return fmt.Errorf("resolve unmanaged Skill conflicts before applying")
 	}
 	if !plan.HasChanges() {
 		fmt.Fprintln(r.Out, "Environment is already up to date.")
@@ -698,10 +692,7 @@ func (r Runner) printPlan(plan environment.Plan, detailed bool) {
 		for _, change := range item.SkillChanges {
 			counts[change.Kind]++
 		}
-		fmt.Fprintf(r.Out, "  skills: +%d ~%d -%d\n", counts["add"], counts["update"], counts["remove"])
-		if len(item.Conflicts) > 0 {
-			fmt.Fprintf(r.Out, "  conflicts: %s\n", strings.Join(item.Conflicts, ", "))
-		}
+		fmt.Fprintf(r.Out, "  skills: +%d ~%d -%d takeover=%d\n", counts["add"], counts["update"], counts["remove"], counts["takeover"])
 		if detailed {
 			for _, change := range item.SkillChanges {
 				fmt.Fprintf(r.Out, "    %s %s\n", change.Kind, change.Name)

@@ -10,7 +10,7 @@ import (
 	"github.com/shellus/ags/internal/localconfig"
 )
 
-func TestPreparePlanDetectsUnmanagedConflict(t *testing.T) {
+func TestPreparePlanPlansUnmanagedTakeover(t *testing.T) {
 	home := t.TempDir()
 	paths := configfile.Paths{
 		StateDir:       filepath.Join(home, "state"),
@@ -33,8 +33,18 @@ func TestPreparePlanDetectsUnmanagedConflict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.Agents) != 1 || len(plan.Agents[0].Conflicts) != 1 {
+	if len(plan.Agents) != 1 {
 		t.Fatalf("plan = %#v", plan.Agents)
+	}
+	item := plan.Agents[0]
+	if item.TakeoverBefore["demo"] == "" {
+		t.Fatalf("takeover = %#v", item.TakeoverBefore)
+	}
+	if len(item.SkillChanges) != 1 || item.SkillChanges[0] != (SkillChange{Name: "demo", Kind: "takeover"}) {
+		t.Fatalf("changes = %#v", item.SkillChanges)
+	}
+	if !plan.HasChanges() {
+		t.Fatal("takeover plan has no changes")
 	}
 	_ = os.RemoveAll(build.Root)
 }

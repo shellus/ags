@@ -29,8 +29,8 @@ type AgentPlan struct {
 	SkillsDestination      string
 	DesiredSkills          map[string]string
 	ManagedBefore          map[string]string
+	TakeoverBefore         map[string]string
 	SkillChanges           []SkillChange
-	Conflicts              []string
 	Stage                  string
 }
 
@@ -52,15 +52,6 @@ func (p *Plan) Cleanup() error {
 func (p Plan) HasChanges() bool {
 	for _, item := range p.Agents {
 		if item.InstalledVersion != item.DesiredVersion || item.InstructionChanged || len(item.SkillChanges) > 0 {
-			return true
-		}
-	}
-	return false
-}
-
-func (p Plan) HasConflicts() bool {
-	for _, item := range p.Agents {
-		if len(item.Conflicts) > 0 {
 			return true
 		}
 	}
@@ -110,6 +101,7 @@ func preparePlan(paths configfile.Paths, config localconfig.Config, source, bran
 			SkillsDestination:      skillsDir,
 			DesiredSkills:          desiredSkills,
 			ManagedBefore:          managedBefore,
+			TakeoverBefore:         map[string]string{},
 			Stage:                  rendered.Stage,
 		}
 		currentInstructionHash, err := fileHash(guidance)
@@ -128,7 +120,8 @@ func preparePlan(paths configfile.Paths, config localconfig.Config, source, bran
 				return Plan{}, hashErr
 			}
 			if _, managed := managedBefore[skillName]; !managed {
-				item.Conflicts = append(item.Conflicts, skillName)
+				item.TakeoverBefore[skillName] = currentHash
+				item.SkillChanges = append(item.SkillChanges, SkillChange{Name: skillName, Kind: "takeover"})
 				continue
 			}
 			if currentHash != desiredHash {
@@ -146,7 +139,6 @@ func preparePlan(paths configfile.Paths, config localconfig.Config, source, bran
 			}
 			return item.SkillChanges[i].Kind < item.SkillChanges[j].Kind
 		})
-		sort.Strings(item.Conflicts)
 		plan.Agents = append(plan.Agents, item)
 	}
 	sort.Slice(plan.Agents, func(i, j int) bool { return plan.Agents[i].Name < plan.Agents[j].Name })

@@ -84,7 +84,7 @@ ags
 3. 从环境仓库读取 `skills/local` 和 `skills/vendor`，不访问上游 Skill Git 仓库。
 4. 准备快照内显式声明的运行依赖。
 5. 安装或升级选中的 Agent npm 包。
-6. 应用全局指令和受管 Skills，并保存环境 commit、版本和文件哈希。
+6. 应用全局指令和受管 Skills，并保存环境 commit、版本和文件哈希。首次应用会备份并接管环境仓库声明的同名 Skill，其他非受管目录保持不变。
 
 环境应用不会自动升级 lockfile。维护环境仓库时显式运行：
 

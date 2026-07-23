@@ -99,6 +99,8 @@ sources:
 		ClaudeGuidance: filepath.Join(root, ".claude", "CLAUDE.md"),
 		ClaudeSkills:   filepath.Join(root, ".claude", "skills"),
 	}
+	writeTestFile(t, filepath.Join(paths.CodexSkills, "demo", "SKILL.md"), "manual version\n")
+	writeTestFile(t, filepath.Join(paths.CodexSkills, "unmanaged", "SKILL.md"), "keep me\n")
 	runner := &serviceRunner{npmRoot: filepath.Join(root, "npm")}
 	service := Service{Paths: paths, Runner: runner}
 	config := localconfig.Config{
@@ -115,8 +117,18 @@ sources:
 		t.Fatal(err)
 	}
 	defer plan.Cleanup()
-	if !plan.HasChanges() || plan.HasConflicts() {
+	if !plan.HasChanges() {
 		t.Fatalf("unexpected plan: %#v", plan)
+	}
+	var codexPlan *AgentPlan
+	for index := range plan.Agents {
+		if plan.Agents[index].Name == agent.Codex {
+			codexPlan = &plan.Agents[index]
+			break
+		}
+	}
+	if codexPlan == nil || len(codexPlan.SkillChanges) != 1 || codexPlan.SkillChanges[0].Kind != "takeover" {
+		t.Fatalf("Codex takeover plan = %#v", plan.Agents)
 	}
 	if err := service.Apply(plan); err != nil {
 		t.Fatal(err)
@@ -132,6 +144,16 @@ sources:
 			t.Fatalf("missing applied path %s: %v", path, err)
 		}
 	}
+	content, err := os.ReadFile(filepath.Join(paths.CodexSkills, "demo", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "---\nname: demo\ndescription: demo\n---\n" {
+		t.Fatalf("Codex demo was not replaced: %q", content)
+	}
+	if content, err := os.ReadFile(filepath.Join(paths.CodexSkills, "unmanaged", "SKILL.md")); err != nil || string(content) != "keep me\n" {
+		t.Fatalf("unrelated unmanaged Skill changed: %q, %v", content, err)
+	}
 	second, err := service.Prepare(config, nil, "")
 	if err != nil {
 		t.Fatal(err)
@@ -139,5 +161,69 @@ sources:
 	defer second.Cleanup()
 	if second.HasChanges() {
 		t.Fatalf("second plan still has changes: %#v", second.Agents)
+	}
+}
+
+func TestRestoreManagedRestoresTakeoverAfterPartialApply(t *testing.T) {
+	root := t.TempDir()
+	paths := configfile.Paths{
+		StateDir:      filepath.Join(root, "state"),
+		CodexGuidance: filepath.Join(root, ".codex", "AGENTS.md"),
+		CodexSkills:   filepath.Join(root, ".codex", "skills"),
+	}
+	writeTestFile(t, paths.CodexGuidance, "old rules\n")
+	writeTestFile(t, filepath.Join(paths.CodexSkills, "demo", "SKILL.md"), "old demo\n")
+	writeTestFile(t, filepath.Join(paths.CodexSkills, "unmanaged", "SKILL.md"), "keep me\n")
+
+	plan := Plan{
+		Build: BuildResult{Root: filepath.Join(root, "build"), Instruction: []byte("new rules\n")},
+		Agents: []AgentPlan{{
+			Name:                   agent.Codex,
+			InstructionDestination: paths.CodexGuidance,
+			SkillsDestination:      paths.CodexSkills,
+			DesiredSkills:          map[string]string{"demo": "new", "added": "new"},
+			ManagedBefore:          map[string]string{},
+			TakeoverBefore:         map[string]string{"demo": "old"},
+		}},
+	}
+	if err := os.MkdirAll(plan.Build.Root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	service := Service{Paths: paths}
+	backups, err := service.backupManaged(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writeTestFile(t, paths.CodexGuidance, "new rules\n")
+	if err := os.RemoveAll(filepath.Join(paths.CodexSkills, "demo")); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(paths.CodexSkills, "demo", "SKILL.md"), "new demo\n")
+	writeTestFile(t, filepath.Join(paths.CodexSkills, "added", "SKILL.md"), "partially added\n")
+	if err := writeMarker(paths.CodexSkills, plan.Agents[0].DesiredSkills); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.restoreManaged(backups); err != nil {
+		t.Fatal(err)
+	}
+
+	for path, expected := range map[string]string{
+		paths.CodexGuidance: "old rules\n",
+		filepath.Join(paths.CodexSkills, "demo", "SKILL.md"):      "old demo\n",
+		filepath.Join(paths.CodexSkills, "unmanaged", "SKILL.md"): "keep me\n",
+	} {
+		content, err := os.ReadFile(path)
+		if err != nil || string(content) != expected {
+			t.Fatalf("restored %s = %q, %v", path, content, err)
+		}
+	}
+	for _, path := range []string{
+		filepath.Join(paths.CodexSkills, "added"),
+		filepath.Join(paths.CodexSkills, ".ags-managed.json"),
+	} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("partial apply path still exists: %s", path)
+		}
 	}
 }
