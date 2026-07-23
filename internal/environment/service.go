@@ -91,56 +91,30 @@ func (s Service) Prepare(config localconfig.Config, overrideAgents []agent.Name,
 
 func (s Service) Apply(plan Plan) error {
 	manager := s.manager()
-	type packageRollback struct {
-		pkg     agent.Package
-		version string
-	}
-	var packageRollbacks []packageRollback
-	rollbackPackages := func() error {
-		var rollbackErr error
-		for index := len(packageRollbacks) - 1; index >= 0; index-- {
-			item := packageRollbacks[index]
-			if item.version == "" {
-				if err := manager.Uninstall(item.pkg); err != nil {
-					rollbackErr = errors.Join(rollbackErr, err)
-				}
-				continue
-			}
-			item.pkg.Version = item.version
-			if err := manager.Install(item.pkg); err != nil {
-				rollbackErr = errors.Join(rollbackErr, err)
-			}
-		}
-		return rollbackErr
+	statePath := filepath.Join(s.Paths.StateDir, "environment.json")
+	state, err := LoadState(statePath)
+	if err != nil {
+		return err
 	}
 
 	for _, item := range plan.Agents {
 		if item.InstalledVersion == item.DesiredVersion {
 			continue
 		}
-		packageRollbacks = append(packageRollbacks, packageRollback{pkg: item.Package, version: item.InstalledVersion})
 		if err := manager.Install(item.Package); err != nil {
-			_ = rollbackPackages()
 			return err
 		}
 	}
 
 	backups, err := s.backupManaged(plan)
 	if err != nil {
-		_ = rollbackPackages()
 		return err
 	}
-	if err := s.applyManaged(plan); err != nil {
+	if err := s.applyManaged(plan, backups); err != nil {
 		fileRollbackErr := s.restoreManaged(backups)
-		packageRollbackErr := rollbackPackages()
-		return errors.Join(err, fileRollbackErr, packageRollbackErr)
+		return errors.Join(err, fileRollbackErr)
 	}
 
-	statePath := filepath.Join(s.Paths.StateDir, "environment.json")
-	state, err := LoadState(statePath)
-	if err != nil {
-		return err
-	}
 	state.Version = stateVersion
 	state.Source = plan.Source
 	state.Branch = plan.Branch
@@ -154,7 +128,11 @@ func (s Service) Apply(plan Plan) error {
 		}
 	}
 	if err := saveState(statePath, state); err != nil {
-		return fmt.Errorf("save environment state: %w", err)
+		fileRollbackErr := s.restoreManaged(backups)
+		return errors.Join(fmt.Errorf("save environment state: %w", err), fileRollbackErr)
+	}
+	if err := discardRootBackups(backups); err != nil {
+		return fmt.Errorf("environment applied but remove previous Skills root: %w", err)
 	}
 	return nil
 }
@@ -213,13 +191,16 @@ func (s Service) Uninstall(name agent.Name, pkg agent.Package, purge bool) error
 }
 
 type agentBackup struct {
-	Name              agent.Name
-	Root              string
-	InstructionExists bool
-	InstructionMode   os.FileMode
-	Skills            []string
-	AffectedSkills    []string
-	MarkerExists      bool
+	Name                agent.Name
+	Root                string
+	InstructionExists   bool
+	InstructionMode     os.FileMode
+	Skills              []string
+	AffectedSkills      []string
+	MarkerExists        bool
+	SkillsRootTakeover  bool
+	RelocatedSkillsRoot string
+	SkillsRootRelocated bool
 }
 
 func (s Service) backupManaged(plan Plan) ([]agentBackup, error) {
@@ -236,6 +217,16 @@ func (s Service) backupManaged(plan Plan) ([]agentBackup, error) {
 			}
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return nil, err
+		}
+		if item.SkillsRootTakeover {
+			backup.SkillsRootTakeover = true
+			relocated, err := reserveSiblingBackupPath(item.SkillsDestination)
+			if err != nil {
+				return nil, err
+			}
+			backup.RelocatedSkillsRoot = relocated
+			backups = append(backups, backup)
+			continue
 		}
 		existingBefore := map[string]string{}
 		for skillName, hash := range item.ManagedBefore {
@@ -283,10 +274,20 @@ func (s Service) backupManaged(plan Plan) ([]agentBackup, error) {
 	return backups, nil
 }
 
-func (s Service) applyManaged(plan Plan) error {
-	for _, item := range plan.Agents {
+func (s Service) applyManaged(plan Plan, backups []agentBackup) error {
+	for index, item := range plan.Agents {
+		backup := &backups[index]
+		if backup.Name != item.Name {
+			return fmt.Errorf("backup for %s belongs to %s", item.Name, backup.Name)
+		}
 		if err := writeRegularFile(item.InstructionDestination, plan.Build.Instruction, 0o644); err != nil {
 			return fmt.Errorf("write %s instructions: %w", item.Name, err)
+		}
+		if item.SkillsRootTakeover {
+			if err := os.Rename(item.SkillsDestination, backup.RelocatedSkillsRoot); err != nil {
+				return fmt.Errorf("relocate previous %s Skills root: %w", item.Name, err)
+			}
+			backup.SkillsRootRelocated = true
 		}
 		if err := os.MkdirAll(item.SkillsDestination, 0o755); err != nil {
 			return err
@@ -333,6 +334,19 @@ func (s Service) restoreManaged(backups []agentBackup) error {
 		} else if err := os.Remove(guidance); err != nil && !errors.Is(err, os.ErrNotExist) {
 			rollbackErr = errors.Join(rollbackErr, err)
 		}
+		if backup.SkillsRootTakeover {
+			if !backup.SkillsRootRelocated {
+				continue
+			}
+			if err := os.RemoveAll(skillsDir); err != nil {
+				rollbackErr = errors.Join(rollbackErr, err)
+				continue
+			}
+			if err := os.Rename(backup.RelocatedSkillsRoot, skillsDir); err != nil {
+				rollbackErr = errors.Join(rollbackErr, err)
+			}
+			continue
+		}
 		for _, skillName := range backup.AffectedSkills {
 			if err := os.RemoveAll(filepath.Join(skillsDir, skillName)); err != nil {
 				rollbackErr = errors.Join(rollbackErr, err)
@@ -353,6 +367,38 @@ func (s Service) restoreManaged(backups []agentBackup) error {
 		}
 	}
 	return rollbackErr
+}
+
+func reserveSiblingBackupPath(path string) (string, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return "", err
+	}
+	placeholder, err := os.CreateTemp(filepath.Dir(path), ".ags-skills-root-*")
+	if err != nil {
+		return "", err
+	}
+	name := placeholder.Name()
+	if err := placeholder.Close(); err != nil {
+		_ = os.Remove(name)
+		return "", err
+	}
+	if err := os.Remove(name); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
+func discardRootBackups(backups []agentBackup) error {
+	var cleanupErr error
+	for _, backup := range backups {
+		if !backup.SkillsRootRelocated {
+			continue
+		}
+		if err := os.RemoveAll(backup.RelocatedSkillsRoot); err != nil {
+			cleanupErr = errors.Join(cleanupErr, err)
+		}
+	}
+	return cleanupErr
 }
 
 func writeRegularFile(path string, content []byte, mode os.FileMode) error {

@@ -27,6 +27,7 @@ type AgentPlan struct {
 	InstructionChanged     bool
 	InstructionDestination string
 	SkillsDestination      string
+	SkillsRootTakeover     bool
 	DesiredSkills          map[string]string
 	ManagedBefore          map[string]string
 	TakeoverBefore         map[string]string
@@ -51,7 +52,7 @@ func (p *Plan) Cleanup() error {
 
 func (p Plan) HasChanges() bool {
 	for _, item := range p.Agents {
-		if item.InstalledVersion != item.DesiredVersion || item.InstructionChanged || len(item.SkillChanges) > 0 {
+		if item.InstalledVersion != item.DesiredVersion || item.InstructionChanged || item.SkillsRootTakeover || len(item.SkillChanges) > 0 {
 			return true
 		}
 	}
@@ -74,9 +75,16 @@ func preparePlan(paths configfile.Paths, config localconfig.Config, source, bran
 		if err != nil {
 			return Plan{}, err
 		}
-		marker, err := readMarker(skillsDir)
+		takeoverRoot, err := skillsRootNeedsTakeover(skillsDir)
 		if err != nil {
 			return Plan{}, err
+		}
+		marker := managedMarker{Version: stateVersion, Skills: map[string]string{}}
+		if !takeoverRoot {
+			marker, err = readMarker(skillsDir)
+			if err != nil {
+				return Plan{}, err
+			}
 		}
 		managedBefore := marker.Skills
 		if len(managedBefore) == 0 {
@@ -99,6 +107,7 @@ func preparePlan(paths configfile.Paths, config localconfig.Config, source, bran
 			DesiredVersion:         pkg.Version,
 			InstructionDestination: guidance,
 			SkillsDestination:      skillsDir,
+			SkillsRootTakeover:     takeoverRoot,
 			DesiredSkills:          desiredSkills,
 			ManagedBefore:          managedBefore,
 			TakeoverBefore:         map[string]string{},
@@ -110,6 +119,11 @@ func preparePlan(paths configfile.Paths, config localconfig.Config, source, bran
 		}
 		item.InstructionChanged = currentInstructionHash != desiredInstructionHash
 		for skillName, desiredHash := range desiredSkills {
+			if takeoverRoot {
+				item.TakeoverBefore[skillName] = ""
+				item.SkillChanges = append(item.SkillChanges, SkillChange{Name: skillName, Kind: "takeover"})
+				continue
+			}
 			path := filepath.Join(skillsDir, skillName)
 			currentHash, hashErr := TreeHash(path)
 			if errors.Is(hashErr, os.ErrNotExist) {
@@ -143,6 +157,17 @@ func preparePlan(paths configfile.Paths, config localconfig.Config, source, bran
 	}
 	sort.Slice(plan.Agents, func(i, j int) bool { return plan.Agents[i].Name < plan.Agents[j].Name })
 	return plan, nil
+}
+
+func skillsRootNeedsTakeover(path string) (bool, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return !info.IsDir() || info.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0, nil
 }
 
 func agentDestinations(paths configfile.Paths, name agent.Name) (string, string, error) {

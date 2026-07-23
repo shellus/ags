@@ -31,7 +31,7 @@ _Avoid_: 主机、操作系统
 _Avoid_: Profile
 
 **Managed Content**:
-由 AGS 拥有的 Agent 包版本、全局指令和 Skill 条目；首次应用时，环境仓库声明的同名 Skill 会被备份并接管，其他非托管条目保持不变。
+由 AGS 拥有的 Agent 包版本、全局指令和 Skill 条目；首次应用时，环境仓库声明的同名 Skill 以及占用 Skills 根路径的旧链接、目录联接或文件会被事务性接管，其他普通目录中的非托管条目保持不变。
 _Avoid_: Agent 配置目录中的所有文件
 
 **Drift**:

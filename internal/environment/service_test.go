@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -14,7 +16,8 @@ import (
 )
 
 type serviceRunner struct {
-	npmRoot string
+	npmRoot  string
+	installs []string
 }
 
 func (r *serviceRunner) Run(_ string, _ []string, name string, args ...string) ([]byte, error) {
@@ -29,6 +32,7 @@ func (r *serviceRunner) Run(_ string, _ []string, name string, args ...string) (
 	}
 	if len(args) >= 3 && args[0] == "install" && args[1] == "-g" {
 		value := args[2]
+		r.installs = append(r.installs, value)
 		index := strings.LastIndex(value, "@")
 		if index <= 0 {
 			return nil, fmt.Errorf("invalid package %s", value)
@@ -101,6 +105,7 @@ sources:
 	}
 	writeTestFile(t, filepath.Join(paths.CodexSkills, "demo", "SKILL.md"), "manual version\n")
 	writeTestFile(t, filepath.Join(paths.CodexSkills, "unmanaged", "SKILL.md"), "keep me\n")
+	writeTestFile(t, paths.ClaudeSkills, "legacy Skills root\n")
 	runner := &serviceRunner{npmRoot: filepath.Join(root, "npm")}
 	service := Service{Paths: paths, Runner: runner}
 	config := localconfig.Config{
@@ -130,6 +135,16 @@ sources:
 	if codexPlan == nil || len(codexPlan.SkillChanges) != 1 || codexPlan.SkillChanges[0].Kind != "takeover" {
 		t.Fatalf("Codex takeover plan = %#v", plan.Agents)
 	}
+	var claudePlan *AgentPlan
+	for index := range plan.Agents {
+		if plan.Agents[index].Name == agent.Claude {
+			claudePlan = &plan.Agents[index]
+			break
+		}
+	}
+	if claudePlan == nil || !claudePlan.SkillsRootTakeover || len(claudePlan.SkillChanges) != 1 || claudePlan.SkillChanges[0].Kind != "takeover" {
+		t.Fatalf("Claude root takeover plan = %#v", plan.Agents)
+	}
 	if err := service.Apply(plan); err != nil {
 		t.Fatal(err)
 	}
@@ -153,6 +168,9 @@ sources:
 	}
 	if content, err := os.ReadFile(filepath.Join(paths.CodexSkills, "unmanaged", "SKILL.md")); err != nil || string(content) != "keep me\n" {
 		t.Fatalf("unrelated unmanaged Skill changed: %q, %v", content, err)
+	}
+	if info, err := os.Lstat(paths.ClaudeSkills); err != nil || !info.IsDir() || info.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 {
+		t.Fatalf("Claude Skills root was not replaced by a directory: %#v, %v", info, err)
 	}
 	second, err := service.Prepare(config, nil, "")
 	if err != nil {
@@ -225,5 +243,93 @@ func TestRestoreManagedRestoresTakeoverAfterPartialApply(t *testing.T) {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("partial apply path still exists: %s", path)
 		}
+	}
+}
+
+func TestRestoreManagedRestoresLinkedSkillsRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating a Windows symlink may require elevated privileges")
+	}
+	root := t.TempDir()
+	paths := configfile.Paths{
+		StateDir:      filepath.Join(root, "state"),
+		CodexGuidance: filepath.Join(root, ".codex", "AGENTS.md"),
+		CodexSkills:   filepath.Join(root, ".codex", "skills"),
+	}
+	legacyRoot := filepath.Join(root, "legacy-skills")
+	writeTestFile(t, filepath.Join(legacyRoot, "legacy", "SKILL.md"), "legacy\n")
+	if err := os.MkdirAll(filepath.Dir(paths.CodexSkills), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(legacyRoot, paths.CodexSkills); err != nil {
+		t.Fatal(err)
+	}
+	stage := filepath.Join(root, "build", "codex")
+	writeTestFile(t, filepath.Join(stage, "demo", "SKILL.md"), "desired\n")
+	plan := Plan{
+		Build: BuildResult{Root: filepath.Join(root, "build"), Instruction: []byte("rules\n")},
+		Agents: []AgentPlan{{
+			Name:                   agent.Codex,
+			InstructionDestination: paths.CodexGuidance,
+			SkillsDestination:      paths.CodexSkills,
+			SkillsRootTakeover:     true,
+			DesiredSkills:          map[string]string{"demo": "desired"},
+			ManagedBefore:          map[string]string{},
+			TakeoverBefore:         map[string]string{"demo": ""},
+			Stage:                  stage,
+		}},
+	}
+	service := Service{Paths: paths}
+	backups, err := service.backupManaged(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.applyManaged(plan, backups); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Lstat(paths.CodexSkills); err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("linked root was not replaced: %#v, %v", info, err)
+	}
+	if err := service.restoreManaged(backups); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Lstat(paths.CodexSkills); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("linked root was not restored: %#v, %v", info, err)
+	}
+	if content, err := os.ReadFile(filepath.Join(legacyRoot, "legacy", "SKILL.md")); err != nil || string(content) != "legacy\n" {
+		t.Fatalf("legacy target changed: %q, %v", content, err)
+	}
+}
+
+func TestApplyDoesNotDowngradeAgentWhenFileApplicationFails(t *testing.T) {
+	root := t.TempDir()
+	npmRoot := filepath.Join(root, "npm")
+	runner := &serviceRunner{npmRoot: npmRoot}
+	blockedParent := filepath.Join(root, "blocked")
+	writeTestFile(t, blockedParent, "not a directory\n")
+	buildRoot := filepath.Join(root, "build")
+	if err := os.MkdirAll(buildRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	plan := Plan{
+		Build: BuildResult{Root: buildRoot, Instruction: []byte("rules\n")},
+		Agents: []AgentPlan{{
+			Name:                   agent.Codex,
+			Package:                agent.Package{Name: agent.Codex, NPMName: "@openai/codex", Version: "2.0.0"},
+			InstalledVersion:       "1.0.0",
+			DesiredVersion:         "2.0.0",
+			InstructionDestination: filepath.Join(blockedParent, "AGENTS.md"),
+			SkillsDestination:      filepath.Join(root, ".codex", "skills"),
+			DesiredSkills:          map[string]string{},
+			ManagedBefore:          map[string]string{},
+			TakeoverBefore:         map[string]string{},
+		}},
+	}
+	service := Service{Paths: configfile.Paths{StateDir: filepath.Join(root, "state")}, Runner: runner}
+	if err := service.Apply(plan); err == nil {
+		t.Fatal("file application unexpectedly succeeded")
+	}
+	if !reflect.DeepEqual(runner.installs, []string{"@openai/codex@2.0.0"}) {
+		t.Fatalf("npm installs = %#v", runner.installs)
 	}
 }
