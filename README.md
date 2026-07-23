@@ -40,7 +40,7 @@ ags
 非交互配置：
 
 ```bash
-ags env source set https://github.com/shellus/agent-env.git
+ags env source set git@github.com:shellus/agent-env.git
 ags env configure --profile default --agents codex,claude
 ags env diff
 ags env apply --yes
