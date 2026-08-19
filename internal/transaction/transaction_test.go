@@ -3,6 +3,7 @@ package transaction
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -26,9 +27,7 @@ func TestApplyReplacesExistingFileAndPreservesMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o640 {
-		t.Fatalf("mode = %o, want 640", info.Mode().Perm())
-	}
+	assertMode(t, info, 0o640)
 }
 
 func TestApplyCreatesPrivateFile(t *testing.T) {
@@ -40,9 +39,7 @@ func TestApplyCreatesPrivateFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("mode = %o, want 600", info.Mode().Perm())
-	}
+	assertMode(t, info, 0o600)
 }
 
 func TestApplyUpdatesSymbolicLinkTargetWithoutReplacingLink(t *testing.T) {
@@ -77,8 +74,16 @@ func TestApplyUpdatesSymbolicLinkTargetWithoutReplacingLink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if targetInfo.Mode().Perm() != 0o640 {
-		t.Fatalf("target mode = %o, want 640", targetInfo.Mode().Perm())
+	assertMode(t, targetInfo, 0o640)
+}
+
+func assertMode(t *testing.T, info os.FileInfo, expected os.FileMode) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		return
+	}
+	if info.Mode().Perm() != expected {
+		t.Fatalf("mode = %o, want %o", info.Mode().Perm(), expected)
 	}
 }
 
