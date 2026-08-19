@@ -66,9 +66,9 @@ type Profile struct {
 }
 
 type AgentProfile struct {
-	Include  []string `yaml:"include,omitempty"`
-	Exclude  []string `yaml:"exclude,omitempty"`
-	Preserve []string `yaml:"preserve,omitempty"`
+	Include        []string `yaml:"include,omitempty"`
+	Exclude        []string `yaml:"exclude,omitempty"`
+	DisabledSkills []string `yaml:"disabled_skills,omitempty"`
 }
 
 type Lock struct {
@@ -195,9 +195,22 @@ func (r Repository) Validate() error {
 		if len(profile.Include) == 0 {
 			return fmt.Errorf("profile %s must include at least one Skill", profileName)
 		}
-		for name := range profile.Agents {
+		for name, agentProfile := range profile.Agents {
 			if _, err := agent.Parse(string(name), false); err != nil {
 				return fmt.Errorf("profile %s: %w", profileName, err)
+			}
+			if len(agentProfile.DisabledSkills) > 0 && name != agent.Codex {
+				return fmt.Errorf("profile %s agent %s cannot configure disabled_skills", profileName, name)
+			}
+			seenDisabled := map[string]bool{}
+			for _, skillName := range agentProfile.DisabledSkills {
+				if skillName != strings.TrimSpace(skillName) || !safeName(skillName) {
+					return fmt.Errorf("profile %s agent %s has unsafe disabled Skill name %q", profileName, name, skillName)
+				}
+				if seenDisabled[skillName] {
+					return fmt.Errorf("profile %s agent %s disables Skill %q more than once", profileName, name, skillName)
+				}
+				seenDisabled[skillName] = true
 			}
 		}
 	}

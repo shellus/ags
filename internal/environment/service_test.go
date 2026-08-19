@@ -83,7 +83,7 @@ profiles:
   default:
     include: ["local:*"]
     agents:
-      codex: {preserve: [".system"]}
+      codex: {disabled_skills: ["openai-docs"]}
       claude: {}
 `)
 	writeTestFile(t, filepath.Join(repoRoot, "environment.lock"), `version: 2
@@ -97,6 +97,7 @@ sources:
 		CacheDir:       filepath.Join(root, "cache"),
 		StateDir:       filepath.Join(root, "state"),
 		CodexDir:       filepath.Join(root, ".codex"),
+		CodexConfig:    filepath.Join(root, ".codex", "config.toml"),
 		CodexGuidance:  filepath.Join(root, ".codex", "AGENTS.md"),
 		CodexSkills:    filepath.Join(root, ".codex", "skills"),
 		ClaudeDir:      filepath.Join(root, ".claude"),
@@ -105,6 +106,7 @@ sources:
 	}
 	writeTestFile(t, filepath.Join(paths.CodexSkills, "demo", "SKILL.md"), "manual version\n")
 	writeTestFile(t, filepath.Join(paths.CodexSkills, "unmanaged", "SKILL.md"), "keep me\n")
+	writeTestFile(t, paths.CodexConfig, "model = \"demo\"\n")
 	writeTestFile(t, paths.ClaudeSkills, "legacy Skills root\n")
 	runner := &serviceRunner{npmRoot: filepath.Join(root, "npm")}
 	service := Service{Paths: paths, Runner: runner}
@@ -169,6 +171,9 @@ sources:
 	if content, err := os.ReadFile(filepath.Join(paths.CodexSkills, "unmanaged", "SKILL.md")); err != nil || string(content) != "keep me\n" {
 		t.Fatalf("unrelated unmanaged Skill changed: %q, %v", content, err)
 	}
+	if content, err := os.ReadFile(paths.CodexConfig); err != nil || !strings.Contains(string(content), "name = \"openai-docs\"") || !strings.Contains(string(content), "enabled = false") {
+		t.Fatalf("Codex disabled Skill config = %q, %v", content, err)
+	}
 	if info, err := os.Lstat(paths.ClaudeSkills); err != nil || !info.IsDir() || info.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 {
 		t.Fatalf("Claude Skills root was not replaced by a directory: %#v, %v", info, err)
 	}
@@ -186,9 +191,11 @@ func TestRestoreManagedRestoresTakeoverAfterPartialApply(t *testing.T) {
 	root := t.TempDir()
 	paths := configfile.Paths{
 		StateDir:      filepath.Join(root, "state"),
+		CodexConfig:   filepath.Join(root, ".codex", "config.toml"),
 		CodexGuidance: filepath.Join(root, ".codex", "AGENTS.md"),
 		CodexSkills:   filepath.Join(root, ".codex", "skills"),
 	}
+	writeTestFile(t, paths.CodexConfig, "model = \"old\"\n")
 	writeTestFile(t, paths.CodexGuidance, "old rules\n")
 	writeTestFile(t, filepath.Join(paths.CodexSkills, "demo", "SKILL.md"), "old demo\n")
 	writeTestFile(t, filepath.Join(paths.CodexSkills, "unmanaged", "SKILL.md"), "keep me\n")
@@ -197,6 +204,10 @@ func TestRestoreManagedRestoresTakeoverAfterPartialApply(t *testing.T) {
 		Build: BuildResult{Root: filepath.Join(root, "build"), Instruction: []byte("new rules\n")},
 		Agents: []AgentPlan{{
 			Name:                   agent.Codex,
+			ConfigDestination:      paths.CodexConfig,
+			ConfigChanged:          true,
+			ConfigMode:             0o600,
+			DesiredConfig:          []byte("model = \"new\"\n"),
 			InstructionDestination: paths.CodexGuidance,
 			SkillsDestination:      paths.CodexSkills,
 			DesiredSkills:          map[string]string{"demo": "new", "added": "new"},
@@ -214,6 +225,7 @@ func TestRestoreManagedRestoresTakeoverAfterPartialApply(t *testing.T) {
 	}
 
 	writeTestFile(t, paths.CodexGuidance, "new rules\n")
+	writeTestFile(t, paths.CodexConfig, "model = \"new\"\n")
 	if err := os.RemoveAll(filepath.Join(paths.CodexSkills, "demo")); err != nil {
 		t.Fatal(err)
 	}
@@ -227,6 +239,7 @@ func TestRestoreManagedRestoresTakeoverAfterPartialApply(t *testing.T) {
 	}
 
 	for path, expected := range map[string]string{
+		paths.CodexConfig:   "model = \"old\"\n",
 		paths.CodexGuidance: "old rules\n",
 		filepath.Join(paths.CodexSkills, "demo", "SKILL.md"):      "old demo\n",
 		filepath.Join(paths.CodexSkills, "unmanaged", "SKILL.md"): "keep me\n",

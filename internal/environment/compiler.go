@@ -26,10 +26,10 @@ type SkillUnit struct {
 }
 
 type RenderedAgent struct {
-	Name     agent.Name
-	Stage    string
-	Skills   []string
-	Preserve []string
+	Name           agent.Name
+	Stage          string
+	Skills         []string
+	DisabledSkills []string
 }
 
 type BuildResult struct {
@@ -118,7 +118,9 @@ func (c Compiler) Build(repo Repository, profileName string, agents []agent.Name
 			skillNames = append(skillNames, unit.Name)
 		}
 		sort.Strings(skillNames)
-		result.Agents[name] = RenderedAgent{Name: name, Stage: stage, Skills: skillNames, Preserve: append([]string{}, profile.Preserve...)}
+		disabledSkills := append([]string{}, profile.DisabledSkills...)
+		sort.Strings(disabledSkills)
+		result.Agents[name] = RenderedAgent{Name: name, Stage: stage, Skills: skillNames, DisabledSkills: disabledSkills}
 	}
 	return result, nil
 }

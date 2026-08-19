@@ -23,7 +23,7 @@ _Avoid_: Skill 源码缓存、本机构建结果
 _Avoid_: 客户端依赖
 
 **Profile**:
-Environment Repository 中一组可供机器选择的 Skill 期望状态，不决定机器启用哪些 Agent。
+Environment Repository 中一组可供机器选择的 Skill 期望状态和 Codex 禁用 Skill 声明，不决定机器启用哪些 Agent。
 _Avoid_: 主机、操作系统
 
 **Local Selection**:
@@ -31,7 +31,7 @@ _Avoid_: 主机、操作系统
 _Avoid_: Profile
 
 **Managed Content**:
-由 AGS 拥有的 Agent 包版本、全局指令和 Skill 条目；首次应用时，环境仓库声明的同名 Skill 以及占用 Skills 根路径的旧链接、目录联接或文件会被事务性接管，其他普通目录中的非托管条目保持不变。
+由 AGS 拥有的 Agent 包版本、全局指令、Skill 条目和带标记的 Codex 禁用 Skill 配置块；首次应用时，环境仓库声明的同名 Skill 以及占用 Skills 根路径的旧链接、目录联接或文件会被事务性接管，其他普通目录和配置保持不变。
 _Avoid_: Agent 配置目录中的所有文件
 
 **Drift**:

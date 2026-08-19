@@ -688,6 +688,17 @@ func (r Runner) printPlan(plan environment.Plan, detailed bool) {
 		} else {
 			fmt.Fprintln(r.Out, "  instructions: unchanged")
 		}
+		disabledSkills := "none"
+		if len(item.DisabledSkills) > 0 {
+			disabledSkills = strings.Join(item.DisabledSkills, ",")
+		}
+		configStatus := "unchanged"
+		if item.ConfigChanged {
+			configStatus = "update"
+		}
+		if item.Name == agent.Codex {
+			fmt.Fprintf(r.Out, "  disabled skills: %s (%s)\n", disabledSkills, configStatus)
+		}
 		counts := map[string]int{}
 		for _, change := range item.SkillChanges {
 			counts[change.Kind]++

@@ -27,7 +27,7 @@ profiles:
   default:
     include: ["*"]
     agents:
-      codex: {preserve: [".system"]}
+      codex: {disabled_skills: ["openai-docs"]}
       claude: {}
 `)
 	writeTestFile(t, filepath.Join(root, "environment.lock"), `version: 2
@@ -41,8 +41,38 @@ sources: {}
 		t.Fatal(err)
 	}
 	profile, include, _, err := repo.Selection("default", agent.Codex)
-	if err != nil || len(include) != 1 || len(profile.Preserve) != 1 {
+	if err != nil || len(include) != 1 || len(profile.DisabledSkills) != 1 || profile.DisabledSkills[0] != "openai-docs" {
 		t.Fatalf("Selection() = %#v %#v %v", profile, include, err)
+	}
+}
+
+func TestRepositoryRejectsDisabledSkillsForClaude(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "instructions", "global.md"), "rules")
+	writeTestFile(t, filepath.Join(root, "skills", "local", "demo", "SKILL.md"), "---\nname: demo\n---\n")
+	writeTestFile(t, filepath.Join(root, "skills", "vendor", snapshotFilename), "version: 1\nsources: {}\nskills: {}\n")
+	writeTestFile(t, filepath.Join(root, "environment.yaml"), `version: 2
+instructions: {global: instructions/global.md}
+skills: {local: skills/local, vendor: skills/vendor}
+agents:
+  codex: {package: "@openai/codex"}
+  claude: {package: "@anthropic-ai/claude-code"}
+sources: {}
+profiles:
+  default:
+    include: ["*"]
+    agents:
+      codex: {}
+      claude: {disabled_skills: ["openai-docs"]}
+`)
+	writeTestFile(t, filepath.Join(root, "environment.lock"), `version: 2
+agents:
+  codex: {version: "1.0.0"}
+  claude: {version: "2.0.0"}
+sources: {}
+`)
+	if _, err := LoadRepository(root); err == nil {
+		t.Fatal("Claude disabled_skills was accepted")
 	}
 }
 

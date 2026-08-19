@@ -195,6 +195,9 @@ type agentBackup struct {
 	Root                string
 	InstructionExists   bool
 	InstructionMode     os.FileMode
+	ConfigExists        bool
+	ConfigMode          os.FileMode
+	ConfigChanged       bool
 	Skills              []string
 	AffectedSkills      []string
 	MarkerExists        bool
@@ -217,6 +220,18 @@ func (s Service) backupManaged(plan Plan) ([]agentBackup, error) {
 			}
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return nil, err
+		}
+		if item.ConfigChanged {
+			backup.ConfigChanged = true
+			if info, err := os.Stat(item.ConfigDestination); err == nil {
+				backup.ConfigExists = true
+				backup.ConfigMode = info.Mode().Perm()
+				if err := copyFile(item.ConfigDestination, filepath.Join(root, "config"), info.Mode().Perm()); err != nil {
+					return nil, err
+				}
+			} else if !errors.Is(err, os.ErrNotExist) {
+				return nil, err
+			}
 		}
 		if item.SkillsRootTakeover {
 			backup.SkillsRootTakeover = true
@@ -283,6 +298,11 @@ func (s Service) applyManaged(plan Plan, backups []agentBackup) error {
 		if err := writeRegularFile(item.InstructionDestination, plan.Build.Instruction, 0o644); err != nil {
 			return fmt.Errorf("write %s instructions: %w", item.Name, err)
 		}
+		if item.ConfigChanged {
+			if err := writeRegularFile(item.ConfigDestination, item.DesiredConfig, item.ConfigMode); err != nil {
+				return fmt.Errorf("write %s config: %w", item.Name, err)
+			}
+		}
 		if item.SkillsRootTakeover {
 			if err := os.Rename(item.SkillsDestination, backup.RelocatedSkillsRoot); err != nil {
 				return fmt.Errorf("relocate previous %s Skills root: %w", item.Name, err)
@@ -333,6 +353,22 @@ func (s Service) restoreManaged(backups []agentBackup) error {
 			}
 		} else if err := os.Remove(guidance); err != nil && !errors.Is(err, os.ErrNotExist) {
 			rollbackErr = errors.Join(rollbackErr, err)
+		}
+		if backup.ConfigChanged {
+			var configPath string
+			switch backup.Name {
+			case agent.Codex:
+				configPath = s.Paths.CodexConfig
+			}
+			if configPath != "" {
+				if backup.ConfigExists {
+					if err := copyFile(filepath.Join(backup.Root, "config"), configPath, backup.ConfigMode); err != nil {
+						rollbackErr = errors.Join(rollbackErr, err)
+					}
+				} else if err := os.Remove(configPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+					rollbackErr = errors.Join(rollbackErr, err)
+				}
+			}
 		}
 		if backup.SkillsRootTakeover {
 			if !backup.SkillsRootRelocated {

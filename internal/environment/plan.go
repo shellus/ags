@@ -1,6 +1,7 @@
 package environment
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -33,6 +34,11 @@ type AgentPlan struct {
 	TakeoverBefore         map[string]string
 	SkillChanges           []SkillChange
 	Stage                  string
+	DisabledSkills         []string
+	ConfigDestination      string
+	ConfigMode             os.FileMode
+	DesiredConfig          []byte
+	ConfigChanged          bool
 }
 
 type Plan struct {
@@ -52,7 +58,7 @@ func (p *Plan) Cleanup() error {
 
 func (p Plan) HasChanges() bool {
 	for _, item := range p.Agents {
-		if item.InstalledVersion != item.DesiredVersion || item.InstructionChanged || item.SkillsRootTakeover || len(item.SkillChanges) > 0 {
+		if item.InstalledVersion != item.DesiredVersion || item.InstructionChanged || item.SkillsRootTakeover || len(item.SkillChanges) > 0 || item.ConfigChanged {
 			return true
 		}
 	}
@@ -112,6 +118,26 @@ func preparePlan(paths configfile.Paths, config localconfig.Config, source, bran
 			ManagedBefore:          managedBefore,
 			TakeoverBefore:         map[string]string{},
 			Stage:                  rendered.Stage,
+			DisabledSkills:         append([]string{}, rendered.DisabledSkills...),
+		}
+		if name == agent.Codex {
+			item.ConfigDestination = paths.CodexConfig
+			item.ConfigMode = 0o600
+			currentConfig, readErr := os.ReadFile(paths.CodexConfig)
+			if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+				return Plan{}, fmt.Errorf("read Codex config: %w", readErr)
+			}
+			if info, statErr := os.Stat(paths.CodexConfig); statErr == nil {
+				item.ConfigMode = info.Mode().Perm()
+			} else if !errors.Is(statErr, os.ErrNotExist) {
+				return Plan{}, fmt.Errorf("stat Codex config: %w", statErr)
+			}
+			desiredConfig, renderErr := configfile.UpdateCodexDisabledSkills(string(currentConfig), item.DisabledSkills)
+			if renderErr != nil {
+				return Plan{}, renderErr
+			}
+			item.DesiredConfig = []byte(desiredConfig)
+			item.ConfigChanged = !bytes.Equal(currentConfig, item.DesiredConfig)
 		}
 		currentInstructionHash, err := fileHash(guidance)
 		if err != nil {

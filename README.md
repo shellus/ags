@@ -7,6 +7,7 @@ AGS 使用公开二进制和私有 Agent Environment Git 仓库完成：
 - 安装、升级和卸载 Codex、Claude Code 的锁定 npm 版本。
 - 应用两个 Agent 共用的全局指令。
 - 拉取并同步 Profile 选择的已发布 Skills 快照。
+- 按 Profile 管理 Codex 原生禁用 Skill 配置。
 - 管理 Codex、Claude Code 的 API Provider。
 - 检查环境漂移、外部依赖和仓库访问。
 - 从 GitHub Release 更新 AGS 自身。
@@ -84,7 +85,7 @@ ags
 3. 从环境仓库读取 `skills/local` 和 `skills/vendor`，不访问上游 Skill Git 仓库。
 4. 准备快照内显式声明的运行依赖。
 5. 安装或升级选中的 Agent npm 包；成功的 npm 升级不会因后续文件应用失败而降级，重试会从已收敛版本继续。
-6. 应用全局指令和受管 Skills，并保存环境 commit、版本和文件哈希。首次应用会事务性接管同名 Skill，以及占用 `skills` 根路径的旧链接、目录联接或文件；其他普通目录中的非受管条目保持不变。
+6. 应用全局指令、受管 Skills 和 Codex 禁用 Skill 配置，并保存环境 commit、版本和文件哈希。首次应用会事务性接管同名 Skill，以及占用 `skills` 根路径的旧链接、目录联接或文件；其他普通目录中的非受管条目保持不变。Codex 配置只修改带 AGS 标记的专属区块。
 
 环境应用不会自动升级 lockfile。维护环境仓库时显式运行：
 
@@ -145,6 +146,20 @@ AGS 只修改以下字段，并保留其他配置：
 | Codex `auth.json` | `OPENAI_API_KEY` |
 | Codex `config.toml` | 顶层 `model`、`[model_providers.custom].base_url` |
 | Claude `settings.json` | 顶层 `model`、`env.ANTHROPIC_AUTH_TOKEN`、`env.ANTHROPIC_BASE_URL` |
+
+上表描述 Provider Switching 的写入范围。Agent Environment 还可通过 Profile 的 `disabled_skills` 管理 Codex `[[skills.config]]` 禁用项；该功能只拥有带 AGS 标记的配置块，不修改 MCP、模型或用户手写的 Skill 配置。
+
+```yaml
+profiles:
+  default:
+    include:
+      - local:*
+    agents:
+      codex:
+        disabled_skills:
+          - openai-docs
+      claude: {}
+```
 
 ## 配置路径
 

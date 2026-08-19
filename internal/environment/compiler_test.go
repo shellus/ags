@@ -25,7 +25,7 @@ profiles:
   default:
     include: ["*"]
     agents:
-      codex: {preserve: [".system"]}
+      codex: {disabled_skills: ["openai-docs"]}
       claude: {}
 `)
 	writeTestFile(t, filepath.Join(root, "environment.lock"), `version: 2
@@ -49,6 +49,9 @@ sources: {}
 	}
 	if _, err := os.Stat(filepath.Join(result.Agents[agent.Codex].Stage, "demo", "SKILL.md")); err != nil {
 		t.Fatal(err)
+	}
+	if got := result.Agents[agent.Codex].DisabledSkills; len(got) != 1 || got[0] != "openai-docs" {
+		t.Fatalf("disabled Skills = %#v", got)
 	}
 }
 

@@ -11,7 +11,7 @@
 ## 领域边界
 
 - Provider Switching 只负责 Provider 注册表解析和 Agent 白名单字段修改。
-- Agent Environment 负责环境仓库、Profile、版本锁、Agent 包、全局指令和 Skills。
+- Agent Environment 负责环境仓库、Profile、版本锁、Agent 包、全局指令、Skills，以及 Profile 声明的 Codex 禁用 Skill 配置。
 - Self Distribution 负责 AGS Release、首次安装和自更新。
 - 三个领域共享 Agent 名称和系统路径，不复制 Provider、环境或更新规则。
 - 领域术语和映射见 `CONTEXT-MAP.md`。
@@ -34,6 +34,7 @@
 - 所有已发布 Skill 先进入本机构建暂存，运行依赖准备完成后才修改 Agent。
 - 未受管同名 Skill 必须报告冲突；只删除 `.ags-managed.json` 记录的 Skill。
 - 全局指令由环境仓库完整拥有，不做本机局部合并。
+- Codex 禁用 Skill 使用原生 `[[skills.config]]`，AGS 只替换带明确起止标记的专属配置块，不覆盖整个 `config.toml`。
 - Agent 包更新和受管文件应用失败时必须回滚已完成步骤。
 - 卸载默认保留认证、会话、缓存和非受管设置；`--purge` 才删除整个 Agent 配置目录。
 
